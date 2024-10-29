@@ -44,7 +44,7 @@ def test_label_validation(InvoiceDataset):
     )
 
     dataset = InvoiceDataset(None)
-    dataset.append([row1, row2, row3])
+    dataset.extend([row1, row2, row3])
 
     # Check missing fields raise appropriate errors
     with pytest.raises(AttributeError):
@@ -65,7 +65,7 @@ def test_dataset_append(InvoiceDataset):
     row2 = InvoiceRow(markdown="invoice2...", date_created=datetime.now())
 
     dataset = InvoiceDataset(None)
-    dataset.append([row1, row2])
+    dataset.extend([row1, row2])
 
     assert len(dataset.rows) == 2
     assert dataset.rows[0].markdown == "invoice1..."
@@ -77,7 +77,7 @@ def test_access_by_index(InvoiceDataset):
     row1 = InvoiceRow(markdown="invoice1...", date_created=datetime.now())
 
     dataset = InvoiceDataset(None)
-    dataset.append([row1])
+    dataset.extend([row1])
 
     retrieved_row = dataset[0]
     assert retrieved_row.markdown == "invoice1..."
@@ -89,7 +89,7 @@ def test_access_by_id(InvoiceDataset):
     row_id = row1.id
 
     dataset = InvoiceDataset(None)
-    dataset.append([row1])
+    dataset.extend([row1])
 
     retrieved_row = dataset[row_id]
     assert retrieved_row.markdown == "invoice1..."
@@ -107,7 +107,7 @@ def test_saving_and_loading(InvoiceDataset):
     row1 = InvoiceRow(markdown="invoice1...", date_created=datetime.now())
 
     dataset = InvoiceDataset(None)
-    dataset.append([row1])
+    dataset.extend([row1])
     dataset.save()
 
     loaded_dataset = InvoiceDataset(None)
@@ -121,5 +121,5 @@ def test_subsets(InvoiceDataset):
     row2 = InvoiceRow(markdown="invoice2...", date_created=datetime.now(), contains_error=False)
 
     dataset = InvoiceDataset(None)
-    dataset.append([row1, row2])
+    dataset.extend([row1, row2])
     dataset.save()

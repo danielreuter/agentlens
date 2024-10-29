@@ -27,11 +27,8 @@ class Hooks:
             self.register(hook)
 
     @classmethod
-    def get(cls) -> Hooks:
-        instance = cls._instance.get()
-        if instance is None:
-            raise RuntimeError("Hooks instance not created")
-        return instance
+    def get(cls) -> Hooks | None:
+        return cls._instance.get()
 
     @classmethod
     @contextmanager

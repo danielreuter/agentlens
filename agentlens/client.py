@@ -259,9 +259,9 @@ class AI:
                 output = await func(*args, **kwargs)
 
                 # run any hooks
-                hooks = Hooks.get()
-                for hook in hooks[task_name]:
-                    hook(output, *args, **kwargs)
+                if (hooks := Hooks.get()):
+                    for hook in hooks[task_name]:
+                        hook(output, *args, **kwargs)
 
                 # log to Langfuse
                 if self.langfuse:
