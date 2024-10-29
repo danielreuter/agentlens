@@ -4,11 +4,11 @@ This library contains a set of lightweight abstractions for building agent scaff
 
 ## Features
 
-- **Decorator-based API**—define arbitrarily complex scaffolds and evaluations by composing your own functions
-- **Clean evaluation framework**—run evals with just a few lines of code, attaching hooks to function calls to inspect their behavior or to bootstrap new evaluation datasets, with heavy use of caching to eliminate redundant computation
-- **Easily bootstrap evaluation datasets**—use the `Row` class to build up datasets field by field, or use the `Dataset` class to save a whole dataset at once, ORM-like syntax that maintains type-safety and validation and migration
-- **Langfuse integration**—get observability for free
-- **Minimalist inference API**—call models using a syntax inspired by Vercel's very elegant [AI SDK](https://sdk.vercel.ai/docs/introduction)
+- **Decorator-driven logic**—define arbitrarily complex scaffolds and evaluations by composing your own functions
+- **Expressive evaluation framework**—run evals with hooks for full control over your agent's computation graph
+- **ORM for datasets**—develop type-safe and validated evaluation datasets with zero boilerplate
+- **Built-in observability**—easy integration with Langfuse
+- **Clean inference API**—call models using a syntax inspired by Vercel's very elegant [AI SDK](https://sdk.vercel.ai/docs/introduction)
 
 ## Overview
 - [Configuration](#configuration)
@@ -23,7 +23,7 @@ Initialize an `AI` object to manage your project's AI logic. Some notes:
 
 - Use of Langfuse is optional
 - Global concurrency limits are set on a per-model basis
-- You can use either OpenAI or Anthropic models, or both
+- You can use OpenAI models, Anthropic models, or both
 
 ```python
 # File: /your_project/ai.py
