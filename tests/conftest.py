@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Any, Dict, List, Optional, Union
 
 import pytest
@@ -16,7 +17,7 @@ def ai(tmp_path):
         run_dir=tmp_path,  # Use temporary directory for test runs
         providers=[
             OpenAIProvider(
-                api_key="test-key",  # Mock API key for testing
+                api_key=os.getenv("OPENAI_API_KEY"),
                 max_connections={
                     "DEFAULT": 10,
                     "gpt-4o-mini": 30,

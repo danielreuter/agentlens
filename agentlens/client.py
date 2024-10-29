@@ -173,6 +173,9 @@ class AI:
         max_retries: int = 3,
         **kwargs,
     ) -> T:
+        # inline types may have invalid __name__ attributes -- replace w/ default
+        if hasattr(type, "__name__"):
+            type.__name__ = "Response"
         provider, model_name = self._get_provider(model)
         return await self._generate(
             provider.generate_object,
@@ -259,7 +262,7 @@ class AI:
                 output = await func(*args, **kwargs)
 
                 # run any hooks
-                if (hooks := Hooks.get()):
+                if hooks := Hooks.get():
                     for hook in hooks[task_name]:
                         hook(output, *args, **kwargs)
 
