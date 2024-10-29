@@ -20,13 +20,17 @@ class RunLog(BaseModel):
 def create_run_log(run_dir: Path):
     log = RunLogs(run_dir)
     run = log.start_run()
+    print("Starting run")
     try:
         yield run
     except Exception:
         run.status = "failed"
+        print("Run failed")
         raise
     finally:
         log.finish_run(run)
+        if run.status != "failed":
+            print("Run completed")
 
 
 class RunLogs:

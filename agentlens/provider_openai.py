@@ -1,6 +1,6 @@
 from typing import Type, TypeVar
 
-from openai import AsyncOpenAI
+from langfuse.openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from agentlens.provider import Message, Provider

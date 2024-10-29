@@ -187,7 +187,7 @@ class AI:
             **kwargs,
         )
 
-    async def run(
+    def run(
         self,
         *,
         main: Callable[[Any], Awaitable[RunT]],
@@ -204,12 +204,15 @@ class AI:
 
         @observe()
         async def run_all():
+            url = langfuse_context.get_current_trace_url()
+            if url:
+                print(f"View trace: {url}")
             tasks = [run_with_hooks(row) for row in dataset]
             return await asyncio.gather(*tasks)
 
         with TaskCache.enable(self._dataset_dir / "cache"):
             with create_run_log(self._run_dir) as log:
-                return await run_all(langfuse_observation_id=log.run_id)
+                return asyncio.run(run_all(langfuse_observation_id=log.run_id))
 
     def hook(self, target_func: Callable, **kwargs) -> Callable[[Callable], Callable[[Row], Hook]]:
         def decorator(cb: Callable) -> Callable[[Row], Hook]:
@@ -221,6 +224,21 @@ class AI:
 
         return decorator
 
+    def score(
+        self,
+        name: str,
+        value: Any,
+        comment: str | None = None,
+    ):
+        if self.langfuse:
+            self.langfuse.score(
+                name=name,
+                value=value,
+                trace_id=langfuse_context.get_current_trace_id(),
+                observation_id=langfuse_context.get_current_observation_id(),
+                comment=comment,
+            )
+
     def task(
         self,
         cache: bool = False,
@@ -228,6 +246,8 @@ class AI:
         capture_output: bool = True,
     ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
         def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+            task_name = func.__name__
+
             # conditionally cache
             if cache:
                 func = TaskCache.cached(func)
@@ -240,13 +260,13 @@ class AI:
 
                 # run any hooks
                 hooks = Hooks.get()
-                for hook in hooks[func]:
+                for hook in hooks[task_name]:
                     hook(output, *args, **kwargs)
 
                 # log to Langfuse
                 if self.langfuse:
                     langfuse_context.update_current_observation(
-                        name=func.__name__,
+                        name=task_name,
                         input=serialize_task_input(args, kwargs) if capture_input else None,
                         output=serialize_task_output(output) if capture_output else None,
                     )

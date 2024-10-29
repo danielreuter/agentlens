@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -50,5 +49,5 @@ class Hooks:
             self.hooks[target_name] = []
         self.hooks[target_name].append(hook)
 
-    def __getitem__(self, func: Callable) -> list[Hook]:
-        return self.hooks.get(func.__name__, [])
+    def __getitem__(self, func_name: str) -> list[Hook]:
+        return self.hooks.get(func_name, [])

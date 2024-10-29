@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import (
     Any,
-    Callable,
     ClassVar,
     Generic,
     Iterator,
@@ -63,46 +62,13 @@ class DatasetFile(BaseModel, Generic[RowT]):
     rows: list[RowT]
 
 
-class SubsetFilterLookup(Generic[RowT]):
-    """Manages and validates dataset subset filters."""
-
-    def __init__(self):
-        self.filters: dict[str, Callable[[RowT], bool]] = {}
-
-    def register(self, name: str, filter_fn: Callable[[RowT], bool]) -> None:
-        if name in self.filters:
-            raise ValueError(f"Subset filter '{name}' already exists")
-        self.filters[name] = filter_fn
-
-    def __getitem__(self, name: str) -> Callable[[list[RowT]], list[RowT]]:
-        if name not in self.filters:
-            raise ValueError(f"Unknown subset filter: '{name}'")
-        return self.filters[name]
-
-
-class DatasetMeta(type):
-    """
-    Metaclass to handle the registration of Dataset subset filters
-    that are decorated with @subset.
-    """
-
-    def __new__(mcs, name, bases, namespace):
-        cls: Dataset = super().__new__(mcs, name, bases, namespace)
-        cls._subset_filters = SubsetFilterLookup()
-        for name, method in namespace.items():
-            if hasattr(method, SUBSET_FILTER_FN_INDICATOR):
-                cls._subset_filters.register(name, method)
-        return cls
-
-
-class Dataset(Generic[RowT], metaclass=DatasetMeta):
+class Dataset(Generic[RowT]):
     name: ClassVar[str]
     dataset_dir: ClassVar[Path]
     subset: str | None
     rows: list[RowT]
     row_type: ClassVar[Type[RowT]] = Row
     _file: DatasetFile[RowT]
-    _subset_filters: ClassVar[SubsetFilterLookup[RowT]]
 
     def __init__(self, subset: str | None = None):
         self.subset = subset
@@ -110,8 +76,8 @@ class Dataset(Generic[RowT], metaclass=DatasetMeta):
 
         rows = self._file.rows
         if subset:
-            in_subset = self._subset_filters[subset]
-            self.rows = [row for row in rows if in_subset(row)]
+            subset_rows, _ = self.split_rows(subset, rows)
+            self.rows = subset_rows
         else:
             self.rows = rows
 
@@ -126,8 +92,11 @@ class Dataset(Generic[RowT], metaclass=DatasetMeta):
 
     @property
     def file_path(self) -> Path:
-        stub = f".{self.subset}" if self.subset else ""
-        return self.dataset_dir / f"{self.name}{stub}.json"
+        # stub = f".{self.subset}" if self.subset else ""
+        stub = ""
+        path = self.dataset_dir / f"{self.name}{stub}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
     def _read_file(self) -> DatasetFile[RowT]:
         if not self.file_path.exists():
@@ -142,9 +111,32 @@ class Dataset(Generic[RowT], metaclass=DatasetMeta):
         json_str = self.file_path.read_text()
         return DatasetFile[self.row_type].model_validate_json(json_str)
 
+    def split_rows(self, subset: str, rows: list[RowT]) -> tuple[list[RowT], list[RowT]]:
+        if not hasattr(self, subset):
+            raise ValueError(f"Subset filter '{subset}' not found")
+
+        filter_method = getattr(self, subset)
+        if not hasattr(filter_method, SUBSET_FILTER_FN_INDICATOR):
+            raise ValueError(f"'{subset}' is not a subset filter")
+
+        subset_rows = []
+        other_rows = []
+
+        for row in rows:
+            if filter_method(row):
+                subset_rows.append(row)
+            else:
+                other_rows.append(row)
+
+        return subset_rows, other_rows
+
     def extend(self, rows: list[RowT]) -> None:
         """Appends rows to the dataset in-place"""
         self.rows.extend(rows)
+
+    def clear(self) -> None:
+        """Clears the dataset in-place"""
+        self.rows.clear()
 
     def save(self) -> None:
         """
@@ -153,8 +145,8 @@ class Dataset(Generic[RowT], metaclass=DatasetMeta):
         # concatenate current subset's rows with the rest of the dataset's rows
         new_rows = self.rows
         if self.subset:
-            in_subset = self._subset_filters[self.subset]
-            new_rows.extend([row for row in self._file.rows if not in_subset(row)])
+            _, other_rows = self.split_rows(self.subset, self._file.rows)
+            new_rows.extend(other_rows)
 
         # overwrite current dataset with new rows
         self._file.rows = new_rows

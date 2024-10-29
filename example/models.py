@@ -1,46 +1,12 @@
-# %%
+from __future__ import annotations
 
 import base64
-import json
-from abc import ABC, abstractmethod
 from io import BytesIO
-from typing import Self
 
 from PIL import Image
 from pydantic import BaseModel
-from pydantic_core.core_schema import with_info_plain_validator_function
 
-
-class Serializable(ABC):
-    def __post_init__(self):
-        self.test_serialization()
-
-    @abstractmethod
-    def model_dump(self) -> dict: ...
-
-    @abstractmethod
-    def model_validate(cls, value) -> Self: ...
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type, _handler):
-        return with_info_plain_validator_function(lambda value, info: cls.model_validate(value))
-
-    def test_serialization(self):
-        dumped = self.model_dump()
-        try:
-            json.dumps(dumped)
-        except Exception as e:
-            raise ValueError(f"model_dump() returned a value that is not serializable to JSON: {e}")
-
-        try:
-            reconstructed = self.model_validate(dumped)
-            redumped = reconstructed.model_dump()
-            assert (
-                dumped == redumped
-            ), "Serialization roundtrip failed! Check that `model_dump()` and `model_validate()` are inverses of each other."
-
-        except Exception as e:
-            raise ValueError(f"Serialization error: {e}")
+from agentlens.serialization import Serializable
 
 
 class PDFPage(Serializable):

@@ -1,5 +1,7 @@
-from agentlens.dataset import Dataset, Label, Row, subset
+from datetime import datetime
+
 from example.ai import ai
+from agentlens.dataset import Dataset, Label, Row, subset
 
 
 ## define your row schema and pass it into a dataset
@@ -10,6 +12,7 @@ from example.ai import ai
 ## and everything is type-safe (Labels are assumed to exist by your IDE)
 class InvoiceRow(Row):
     markdown: str
+    date_created: datetime
     total_cost: float = Label()
     contains_error: bool = Label()
 

@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import json
 import pickle
 from abc import ABC, abstractmethod
-from typing import Self
 
 from pydantic import BaseModel
 from pydantic_core.core_schema import with_info_plain_validator_function
@@ -13,7 +14,7 @@ class Serializable(ABC):
 
     @classmethod
     @abstractmethod
-    def model_validate(cls, value) -> Self: ...
+    def model_validate(cls, value) -> Serializable: ...
 
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type, _handler):
