@@ -4,9 +4,9 @@ This library contains a set of lightweight abstractions for building agent scaff
 
 ## Features
 
-- **Decorator-driven logic**—define arbitrarily complex scaffolds and evaluations by composing your own functions
+- **Decorator-driven logic**—define arbitrarily complex scaffolds and evaluations by composing functions
 - **Expressive evaluation framework**—run evals with hooks for full control over your agent's computation graph
-- **ORM for datasets**—develop type-safe and validated evaluation datasets with zero boilerplate
+- **ORM for datasets**—quickly bootstrap type-safe, validated datasets with zero boilerplate
 - **Built-in observability**—easy integration with Langfuse
 - **Clean inference API**—call models using a syntax inspired by Vercel's very elegant [AI SDK](https://sdk.vercel.ai/docs/introduction)
 
