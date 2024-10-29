@@ -2,12 +2,6 @@
 
 This library contains a set of lightweight abstractions for building agent scaffolds that are easy to evaluate and maintain.
 
-
-
-Other libraries are opinionated about how you write agentic *logic* (often by extending third-party classes), and are unopinionated about how you develop datasets and observability tools. This one is the opposite--allowing you to express arbitrarily complex agentic logic while making it easy to develop evaluations and see what's going on internally.
-
-It emphasizes the use of functions, not classes.
-
 ## Features
 
 - **Decorator-based API**—define arbitrarily complex scaffolds and evaluations by composing your own functions
