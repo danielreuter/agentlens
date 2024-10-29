@@ -1,4 +1,4 @@
-# reagency
+# agentlens
 
 This library contains a set of lightweight abstractions for building agent scaffolds that are easy to evaluate and maintain.
 
@@ -37,7 +37,7 @@ Initialize an `AI` object to manage your project's AI logic. Some notes:
 from pathlib import Path
 
 from langfuse import Langfuse
-from reagency import AI, AnthropicProvider, OpenAIProvider
+from agentlens import AI, AnthropicProvider, OpenAIProvider
 
 PROJECT_ROOT = Path(__file__).parent
 
@@ -111,7 +111,7 @@ from io import BytesIO
 from typing import Any
 
 from PIL import Image
-from reagency import Serializable
+from agentlens import Serializable
 
 
 class PDF(Serializable):
@@ -220,7 +220,7 @@ Here's an example:
 
 ```python
 from pydantic import BaseModel
-from reagency import Dataset
+from agentlens import Dataset
 
 
 class Invoice(BaseModel):

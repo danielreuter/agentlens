@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "agentlens"
+version = "0.1.0"
+description = "lightweight abstractions for building agent scaffolds"
+authors = ["danielreuter <dreuter14@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+langfuse = "^2.52.1"
+mypy = "^1.12.1"
+openai = "^1.52.1"
+anthropic = "^0.37.1"
+petname = "^2.6"
+python-dotenv = "^1.0.1"
+tenacity = "^9.0.0"
+pillow = "^11.0.0"
+joblib = "^1.4.2"
+pytest-asyncio = "^0.24.0"
+nest-asyncio = "^1.6.0"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+pytest = "^8.3.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
