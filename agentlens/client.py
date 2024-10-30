@@ -14,7 +14,7 @@ from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponen
 from agentlens.cache import TaskCache
 from agentlens.dataset import Dataset, Row
 from agentlens.hooks import Hook, Hooks
-from agentlens.log import create_run_log
+from agentlens.log import create_run_log, get_run_dir
 from agentlens.provider import Message, Provider
 from agentlens.serialization import serialize_task_input, serialize_task_output
 from agentlens.utils import create_path
@@ -241,6 +241,9 @@ class AI:
                 observation_id=langfuse_context.get_current_observation_id(),
                 comment=comment,
             )
+
+    def run_dir(self) -> Path:
+        return get_run_dir()
 
     def task(
         self,

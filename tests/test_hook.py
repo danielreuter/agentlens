@@ -50,10 +50,12 @@ async def test_multiple_hooks_same_task(ai, ai_fixture):
     @ai.hook(square)
     def capture_input(row: TestRow, output, x):
         inputs.append((row.value, x))
+        ai.run_dir()
 
     @ai.hook(square)
     def capture_output(row: TestRow, output, x):
         outputs.append((row.value, output))
+        ai.run_dir()
 
     @ai.dataset("test")
     class TestDataset(Dataset[TestRow]): ...
@@ -94,6 +96,7 @@ async def test_hook_with_pydantic_models(ai, ai_fixture):
                 "result": output.result,
             }
         )
+        ai.run_dir()
 
     @ai.dataset("test")
     class TestDataset(Dataset[MultiplyRow]): ...
@@ -166,6 +169,7 @@ async def test_hooks_error_handling(ai: AI, simple_dataset_tasks):
     def capture_error(row: TestRow, output, x):
         # Hook should not be called if task fails
         results.append((row.value, x))
+        ai.run_dir()
 
     @ai.dataset("test")
     class TestDataset(Dataset[TestRow]): ...
@@ -201,6 +205,7 @@ async def test_multiple_rows_with_hooks(ai, ai_fixture):
                 "actual": output,
             }
         )
+        ai.run_dir()
 
     @ai.dataset("test")
     class TestDataset(Dataset[CaptureRow]): ...

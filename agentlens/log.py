@@ -1,12 +1,14 @@
 import json
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+import petname
 from pydantic import BaseModel
 
-from agentlens.utils import create_readable_id
+current_run_dir: ContextVar[Path] = ContextVar("current_run_dir")
 
 
 class RunLog(BaseModel):
@@ -16,30 +18,13 @@ class RunLog(BaseModel):
     end_time: Optional[str] = None
 
 
-@contextmanager
-def create_run_log(run_dir: Path):
-    log = RunLogs(run_dir)
-    run = log.start_run()
-    print("Starting run")
-    try:
-        yield run
-    except Exception:
-        run.status = "failed"
-        print("Run failed")
-        raise
-    finally:
-        log.finish_run(run)
-        if run.status != "failed":
-            print("Run completed")
-
-
-class RunLogs:
-    def __init__(self, run_dir: Path):
-        self._run_dir = run_dir
+class RunHistory:
+    def __init__(self, runs_dir: Path):
+        self._runs_dir = runs_dir
         self.runs = self.load()
 
     def file_path(self) -> Path:
-        path = self._run_dir / "run_log.json"
+        path = self._runs_dir / "run_history.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -56,14 +41,14 @@ class RunLogs:
 
     def create_id(self) -> str:
         counter = 0
-        while True and counter < 100:
-            id = create_readable_id()
+        while counter < 100:
+            id = petname.generate(words=3, separator="_")
             if id not in {run.run_id for run in self.runs}:
                 return id
-            counter += 1  # just in case
+            counter += 1
         raise Exception("Failed to create a unique run id")
 
-    def start_run(self) -> RunLog:
+    def add_run(self) -> RunLog:
         run = RunLog(
             run_id=self.create_id(),
             status="started",
@@ -73,8 +58,40 @@ class RunLogs:
         self.save()
         return run
 
-    def finish_run(self, run: RunLog):
-        if run.status != "failed":  # Only update status if not already failed
-            run.status = "completed"
-        run.end_time = datetime.now().isoformat()
+    def complete_run(self, log: RunLog):
+        if log.status != "failed":
+            log.status = "completed"
+        log.end_time = datetime.now().isoformat()
         self.save()
+
+
+@contextmanager
+def create_run_log(runs_dir: Path):
+    history = RunHistory(runs_dir)
+    log = history.add_run()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = runs_dir / f"{timestamp}_{log.run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    token = current_run_dir.set(run_dir)
+
+    print(f"Starting run {log.run_id}")
+    try:
+        yield log
+    except Exception:
+        log.status = "failed"
+        print(f"Run {log.run_id} failed")
+        raise
+    finally:
+        history.complete_run(log)
+        current_run_dir.reset(token)
+        if log.status != "failed":
+            print(f"Run {log.run_id} completed")
+
+
+def get_run_dir() -> Path:
+    try:
+        return current_run_dir.get()
+    except LookupError:
+        raise RuntimeError("No active run context - this can only be called during a run")
