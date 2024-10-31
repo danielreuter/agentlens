@@ -2,6 +2,10 @@
 
 This library contains a set of lightweight abstractions for building agent scaffolds that are easy to evaluate and maintain.
 
+```bash
+pip install agentlens
+```
+
 ## Features
 
 - **Decorator-driven logic**—define arbitrarily complex scaffolds and evaluations by composing functions
