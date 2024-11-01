@@ -26,7 +26,7 @@ pip install agentlens
 Initialize a `Lens` object to manage your project's observability and evaluation logic, and an `AI` object for clean access to OpenAI and Anthropic models.
 
 ```python
-# File: /your_project/ai.py
+# File: /your_project/config.py
 
 import os
 from pathlib import Path
@@ -55,7 +55,7 @@ ai = AI(
             },
         ),
         AnthropicProvider(
-            api_key="...",  # your Anthropic API key
+            api_key=os.environ["ANTHROPIC_API_KEY"],
             max_connections={
                 "DEFAULT": 10,
                 "claude-3-5-sonnet": 5,
@@ -119,7 +119,7 @@ from your_project.config import ai, ls
 
 
 @ls.task()
-async def transcribe_pdf(image: Image) -> str:
+async def transcribe_pdf(image: Image.Image) -> str:
     return await ai.generate_text(
         model="gpt-4o-mini",
         messages=[
