@@ -44,11 +44,13 @@ class Observation(BaseModel):
     def get_duration(self) -> str:
         if self.end_time is None:
             return "..."
-        return f"{self.end_time - self.start_time:.2f}s"
+        duration = self.end_time - self.start_time
+        return f"{duration.total_seconds():.2f}s"
 
 
 class Run:
-    def __init__(self, dir: Path, name: str, row: Row, hooks: dict[str, list[Hook]]):
+    def __init__(self, key: str, dir: Path, name: str, row: Row, hooks: dict[str, list[Hook]]):
+        self.key = key
         self.dir = dir
         self.dir.mkdir(parents=True, exist_ok=True)
         self.hooks = hooks

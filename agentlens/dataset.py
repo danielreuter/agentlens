@@ -27,7 +27,7 @@ SUBSET_FILTER_FN_INDICATOR = "_is_subset_filter_function"
 def Label(
     default: Any = MISSING_LABEL,
     **kwargs,
-) -> Field:
+) -> Any:
     return Field(default=default, **kwargs)
 
 
@@ -67,13 +67,12 @@ class Dataset(Generic[RowT]):
     dataset_dir: ClassVar[Path]
     subset: str | None
     rows: list[RowT]
-    row_type: ClassVar[Type[RowT]] = Row
+    row: ClassVar[Type[RowT]]
     _file: DatasetFile[RowT]
 
     def __init__(self, subset: str | None = None):
         self.subset = subset
         self._file = self._read_file()
-
         rows = self._file.rows
         if subset:
             subset_rows, _ = self.split_rows(subset, rows)
@@ -87,8 +86,10 @@ class Dataset(Generic[RowT]):
             if getattr(base, "__origin__", None) is Dataset:
                 args = base.__args__
                 if args:
-                    cls.row_type = args[0]
+                    cls.row = args[0]
                     break
+        if cls.row is None:
+            raise ValueError("Dataset must specify a row type")
 
     @property
     def file_path(self) -> Path:
@@ -109,7 +110,7 @@ class Dataset(Generic[RowT]):
                 rows=[],
             )
         json_str = self.file_path.read_text()
-        return DatasetFile[self.row_type].model_validate_json(json_str)
+        return DatasetFile[self.row].model_validate_json(json_str)
 
     def split_rows(self, subset: str, rows: list[RowT]) -> tuple[list[RowT], list[RowT]]:
         if not hasattr(self, subset):

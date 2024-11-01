@@ -19,6 +19,7 @@ import nest_asyncio
 import petname
 
 from agentlens.cache import TaskCache
+from agentlens.console import RunConsole
 from agentlens.dataset import Dataset, Row
 from agentlens.hooks import Hook
 from agentlens.trace import Observation, Run
@@ -53,7 +54,7 @@ class Lens:
         cache: bool = False,
     ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]: ...
 
-    @overload
+    @overload  # type: ignore[misc]
     def task(
         self,
         name: str | None = None,
@@ -81,7 +82,7 @@ class Lens:
             else:
                 return self._sync_task(func, task_name)
 
-        return decorator
+        return decorator  # type: ignore[return-value]
 
     def _async_task(
         self,
@@ -138,58 +139,63 @@ class Lens:
         self,
         *,
         main: Callable[[Row], Awaitable[R]] | Callable[[Row], R],
-        hooks: list[Callable[[Row], Hook]] | None = None,
         dataset: Dataset,
-        report: Callable[[], str] | None = None,
+        hooks: list[Callable[[Row], Hook]] | None = None,
     ) -> list[R]:
-        # sketchy -- should only be used in evals
         nest_asyncio.apply()
-        with TaskCache.enable(self._dataset_dir / "cache"):
-            if asyncio.iscoroutinefunction(main):
-                return self._run_async(main, dataset, hooks)
-            else:
-                typed_main = cast(Callable[[Row], R], main)
-                return self._run_sync(typed_main, dataset, hooks)
+        run_key = self._create_run_key()
+        runs = []
+        results: list[R] = []
+
+        for idx, row in enumerate(dataset):
+            runs.append(
+                Run(
+                    key=run_key,
+                    dir=self._runs_dir / f"row_{idx}",
+                    name=f"Row {idx}",
+                    row=row,
+                    hooks=self._initialize_hooks(row, hooks),
+                )
+            )
+
+        async def execute():
+            nonlocal results
+            with TaskCache.enable(self._dataset_dir / "cache"):
+                if asyncio.iscoroutinefunction(main):
+                    results = await self._run_async(main, runs)
+                else:
+                    typed_main = cast(Callable[[Row], R], main)
+                    results = self._run_sync(typed_main, runs)
+
+        console = RunConsole(runs, execute)
+        console.run()
+        return results
 
     def _run_sync(
         self,
         main: Callable[[Row], R],
-        dataset: Dataset,
-        hooks: list[Callable[[Row], Hook]] | None = None,
+        runs: list[Run],
     ) -> list[R]:
         # maybe unnest if only one row
         results = []
-        for idx, row in enumerate(dataset):
-            run = Run(
-                dir=self._runs_dir / f"row_{idx}",
-                name=f"Row {idx}",
-                row=row,
-                hooks=self._initialize_hooks(row, hooks),
-            )
+        for run in runs:
             _run_context.set(run)
-            result = main(row)
+            result = main(run.row)
             results.append(result)
         return results
 
     def _run_async(
         self,
         main: Callable[[Row], Awaitable[R]],
-        dataset: Dataset,
-        hooks: list[Callable[[Row], Hook]] | None = None,
+        runs: list[Run],
     ) -> list[R]:
         # maybe unnest if only one row
-        async def _run_row(row: Row, idx: int) -> R:
-            run = Run(
-                dir=self._runs_dir / f"row_{idx}",
-                name=f"Row {idx}",
-                row=row,
-                hooks=self._initialize_hooks(row, hooks),
-            )
+        async def _run_one(run: Run) -> R:
             _run_context.set(run)
-            return await main(row)
+            return await main(run.row)
 
         async def _run_all() -> list[R]:
-            tasks = [_run_row(row, idx) for idx, row in enumerate(dataset)]
+            tasks = [_run_one(run) for run in runs]
             return await asyncio.gather(*tasks)
 
         return asyncio.run(_run_all())
