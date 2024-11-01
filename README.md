@@ -23,35 +23,34 @@ pip install agentlens
 
 ## Configuration
 
-Initialize an `AI` object to manage your project's AI logic. Some notes:
-
-- Use of Langfuse is optional
-- Global concurrency limits are set on a per-model basis
-- You can use OpenAI models, Anthropic models, or both
+Initialize a `Lens` object to manage your project's observability and evaluation logic, and an `AI` object for clean access to OpenAI and Anthropic models.
 
 ```python
 # File: /your_project/ai.py
 
+import os
 from pathlib import Path
 
-from langfuse import Langfuse
-from agentlens import AI, AnthropicProvider, OpenAIProvider
+from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).parent
+from agentlens import AI, Lens, OpenAIProvider, AnthropicProvider
+
+load_dotenv()
+
+ROOT_DIR = Path(__file__).parent
+
+ls = Lens(
+    runs_dir=ROOT_DIR / "runs",  # where to store runs
+    dataset_dir=ROOT_DIR / "datasets",  # where to store datasets
+)
 
 ai = AI(
-    dataset_dir=PROJECT_ROOT / "datasets",  # where your datasets will be stored
-    cache_dir=PROJECT_ROOT,  # where to store cached responses
-    observability=Langfuse(  # optional
-        secret_key="...",
-        public_key="...",
-        host="...",
-    ),
     providers=[
         OpenAIProvider(
-            api_key="...",  # your OpenAI API key
-            max_connections={  # maximum number of concurrent requests per model
+            api_key=os.environ["OPENAI_API_KEY"],
+            max_connections={ # global concurrency limits set on a per-model basis
                 "DEFAULT": 10,
+                "o1-preview": 2,
                 "gpt-4o-mini": 30,
             },
         ),
@@ -71,86 +70,33 @@ By default API keys will be read from environment variables, but you can also pa
 
 The basic building block of the library is a **task**. A task is a function that makes one or more calls to an AI model. 
 
-Declaring a function as a task enters it into a unified observability and evaluation ecosystem. Do so using the `@ai.task()` decorator:
+Declaring a function as a task enters it into a unified observability and evaluation ecosystem. Do so using the `task` decorator on the `Lens` object:
 
 ```python
-from your_project.ai import ai
+from your_project.config import ls
 
 
-@ai.task()
+@ls.task()
 def some_task(some_input: str) -> str:
     pass  # insert some AI logic here
 ```
 
-The `@ai.task()` decorator takes the following optional arguments:
+The `task` decorator takes the following optional arguments:
+- `name: str | None = None`--a name for the task, which will be used in the UI and in logging
 - `cache: bool = False`--cache the input/output of the task for use in evaluations
 - `max_retries: int = 0`--number of retries on failure, defaults to 0
 
-And if Langfuse is enabled, you can also use:
-- `capture_input: bool = True`--log input data to Langfuse
-- `capture_output: bool = True`--log output data to Langfuse
-
-__**Important note: caching and logging only work on serializable values.**__
-
-The library will automatically serialize the following data types for you:
-
-- Primitives (e.g. `str`, `int`, `float`, `bool`)
-- [Pydantic models](https://docs.pydantic.dev/latest/api/base_model/)
-- A subclass of the library-provided `Serializable`, which must implement `model_dump()` and `model_validate()` methods that serialize and deserialize the object, respectively
-- Collections of the above types (lists, dictionaries, sets, tuples)
-
-> `Serializable` will check at evaluation-time that any serialization/deserialization methods you've implemented are lossless, and will raise an exception if they are not.
-
-Here is how you might render a PDF as a JSON-serializable object:
-
-```python
-import base64
-from io import BytesIO
-from typing import Any
-
-from PIL import Image
-from agentlens import Serializable
-
-
-class PDF(Serializable):
-    """A serializable PDF document."""
-
-    pages: list[Image.Image]
-
-    def model_dump(self) -> dict[str, Any]:
-        """Convert to a dictionary of serializable Python objects."""
-        pages_b64 = []
-        for page in self.pages:
-            with BytesIO() as buffer:
-                page.save(buffer, format="PNG")
-                pages_b64.append(base64.b64encode(buffer.getvalue()).decode())
-        return {"pages": pages_b64}
-
-    @classmethod
-    def model_validate(cls, data: dict[str, Any]) -> "PDF":
-        """Create instance from a dictionary of serializable Python objects."""
-        pages = []
-        for page_b64 in data["pages"]:
-            image_bytes = base64.b64decode(page_b64)
-            pages.append(Image.open(BytesIO(image_bytes)))
-        return cls(pages=pages)
-
-
-@ai.task()
-def transcribe_pdf(pdf: PDF) -> str:
-    pass  # insert some AI logic here
-```
-
-Note: 
-
 ## Inference
 
-The library exposes a boilerplate-free wrapper around the OpenAI and Anthropic APIs. Its syntax is inspired by Vercel's very elegant AI SDK.
+The library exposes a boilerplate-free wrapper around the OpenAI and Anthropic APIs. 
 
 In the simplest case, you might just want to feed some model a user prompt and (optionally) a system prompt, and have it return a string using `generate_text`:
 
 ```python
-@ai.task()
+from your_project.config import ai, ls
+
+
+@ls.task()
 async def summarize(text: str) -> str:
     return await ai.generate_text(
         model="gpt-4o-mini",
@@ -165,18 +111,22 @@ async def summarize(text: str) -> str:
     )
 ```
 
-To phrase more complex requests, you may opt to pass the model a list of messages. The following uses the `PDF` model we defined earlier:
+To phrase more complex requests, you may opt to pass the model a list of messages:
 
 ```python
-@ai.task()
-async def transcribe_pdf(pdf: PDF) -> str:
+from PIL import Image
+from your_project.config import ai, ls
+
+
+@ls.task()
+async def transcribe_pdf(image: Image) -> str:
     return await ai.generate_text(
         model="gpt-4o-mini",
         messages=[
             ai.message.system("You are a helpful assistant."),
             ai.message.user(
-                "Please transcribe the following PDF to Markdown:",
-                ai.message.image(pdf.pages[0]),
+                "Please transcribe the following PDF page to Markdown:",
+                ai.message.image(image),
             ),
         ],
     )
@@ -191,16 +141,16 @@ class PDFMetadata(BaseModel):
     author: str | None
 
 
-@ai.task()
-async def extract_pdf_metadata(pdf: PDF) -> PDFMetadata:
+@ls.task()
+async def extract_pdf_metadata(image: Image) -> PDFMetadata:
     return await ai.generate_object(
         model="gpt-4o",
         type=PDFMetadata,
         messages=[
             ai.message.system("You are a helpful assistant."),
             ai.message.user(
-                "Extract metadata from the following article:",
-                *[ai.message.image(page) for page in pdf.pages],
+                "Extract metadata from the following PDF page:",
+                ai.message.image(image),
             ),
         ],
     )
@@ -210,54 +160,64 @@ async def extract_pdf_metadata(pdf: PDF) -> PDFMetadata:
 
 The library exposes an ORM-like API for developing evaluation datasets. 
 
-Simply subclass `Dataset` and provide the following: 
-- A `NAME` attribute -- this will be used to namespace different versions of the dataset
-- Two type arguments, which will be used internally for typing and validating your dataset -- the first one is used for your _data_, the second is for your _targets_
+A `Dataset` is defined by a `Row` schema and a name. The name will identify it in the datasets directory, as well as in the UI and in eval logs.
 
-Here's an example:
+`Row` is just like a normal Pydantic model, except it will not error on missing labels when you load the dataset -- it will only error if you try to access a missing label, e.g. in a hook. This allows you to progressively bootstrap type-safe labels. 
 
 ```python
-from pydantic import BaseModel
-from agentlens import Dataset
+from datetime import datetime
+from agentlens import Dataset, Label, Row
 
 
-class Invoice(BaseModel):
-    text: str
+class InvoiceRow(Row):
+    markdown: str 
+    date_created: datetime  
+    total_cost: float = Label()  
+    contains_error: bool = Label()  
+
+# define dataset and give it a name
+@ls.dataset("invoices")
+class InvoiceDataset(Dataset[InvoiceRow]): 
+
+    # define subsets as filters on the rows
+    # the name is the argument passed to `subset`, defaulting to the function name
+    @subset("september")
+    def september(self, row: InvoiceRow):
+        return row.date_created.month == 9
 
 
-class Targets(BaseModel):
-    is_corrupted: bool  # True if the invoice data is corrupted, False otherwise
-    total_cost: float | None  # The total cost of the invoice, or None if it's corrupted
+# create and add rows (labels can be added later)
+row1 = InvoiceRow(markdown="invoice1...")
+row2 = InvoiceRow(markdown="invoice2...")
 
+# initialize dataset and add rows
+dataset = InvoiceDataset("september")
+InvoiceDataset.extend([row1, row2])
 
-class InvoiceDataset(Dataset[Invoice, Targets]):
-    NAME = "invoices"
+# access rows by index or ID
+first_row = dataset[0]
+specific_row = dataset["some_row_id"]
 
+# labels are type-safe and validated
+first_row.total_cost = 100  # set a label
+print(first_row.total_cost)  # access a label (throws error if not set)
 
-# save a dataset split -- targets can be attached now or later (you'll see how in the next section)
-InvoiceDataset.save(
-    split="train",
-    data=[Invoice(...), Invoice(...)],
-)
+# save changes
+dataset.save()
 
-# load a dataset split
-dataset = InvoiceDataset.load("train")
-
-for data, targets in dataset:
-    print(data, targets)
+# load a specific subset
+september_invoices = InvoiceDataset("september")
 ```
 
 ## Evaluation
 
-The evaluation API uses hooks to give you precise control over your agent's computation graph.
-
-You can run evaluations either from a Jupyter cell or from the CLI. 
+The evaluation API uses hooks to give you fine-grained control over your agent's computation graph, and you can run them either from a Jupyter cell or from the CLI. 
 
 First let's define a simple set of tasks, riffing off of the invoice data structure we defined in the `Dataset` section:
 
 ```python
-@ai.task()
-async def process_invoice(invoice: Invoice) -> float | str:
+@ls.task()
+async def process_invoice(invoice: str) -> float | str:
     looks_fine = await check_integrity(invoice)
 
     if not looks_fine:
@@ -266,8 +226,8 @@ async def process_invoice(invoice: Invoice) -> float | str:
     return await extract_total_cost(invoice)
 
 
-@ai.task()
-async def check_integrity(invoice: Invoice, model: str = "gpt-4o-mini") -> bool:
+@ls.task()
+async def check_integrity(invoice: str, model: str = "gpt-4o-mini") -> bool:
     return await ai.generate_object(
         model=model,
         type=bool,
@@ -275,16 +235,16 @@ async def check_integrity(invoice: Invoice, model: str = "gpt-4o-mini") -> bool:
     )
 
 
-@ai.task()
-async def generate_error_report(invoice: Invoice) -> str:
+@ls.task()
+async def generate_error_report(invoice: str) -> str:
     return await ai.generate_text(
         model="gpt-4o",
         prompt=f"Write an error report for this corrupted invoice: {invoice.text}",
     )
 
 
-@ai.task()
-async def extract_total_cost(invoice: Invoice, model: str = "gpt-4o") -> float:
+@ls.task()
+async def extract_total_cost(invoice: str, model: str = "gpt-4o") -> float:
     return await ai.generate_object(
         model=model,
         type=float,
@@ -299,54 +259,58 @@ We will use hooks to:
 2. Tap into the execution of these functions to write the results to the dataset as target labels
 
 ```python
-dataset = InvoiceDataset()
+dataset = InvoiceDataset("september")
 
-@ai.hook(check_integrity, model="o1-preview")
-def hook_check_integrity(input, output, row):
-    row.builder["is_corrupted"] = output
+@ls.hook(check_integrity, model="o1-preview")
+def hook_check_integrity(row: InvoiceRow, output, *args, **kwargs):
+    row.contains_error = not output
 
-@ai.hook(extract_total_cost, model="o1-preview")
-def hook_extract_total_cost(input, output, row):
-    row.builder["total_cost"] = output
+@ls.hook(extract_total_cost, model="o1-preview")
+def hook_extract_total_cost(row: InvoiceRow, output, *args, **kwargs):
+    row.total_cost = output
 
-ai.run(
+ls.run(
     main=process_invoice,
     dataset=dataset,
     hooks=[hook_check_integrity, hook_extract_total_cost],
-    strict=False,  # disable strict mode to allow for partial runs
 )
+
+dataset.save()
 ```
 
-Now that we have labels, we can evaluate the `check_integrity` and `extract_total_cost` tasks as they were originally defined. 
+Now that we have labels, we can evaluate the `check_integrity` and `extract_total_cost` tasks as they were originally defined.
 
-We can also add a `report` function to the `ai.eval()` call to generate a Markdown report summarizing the results, which will be written to `evals/runs/<run_id>/report.md`. Here we will only write a simple report, but one common pattern is to deploy language models to inspect your agent's behavior and summarize their findings for you.
-
-Again, hooks provide an expressive way to write scoring logic, by reading state from parent scope:
+TODO: describe how to run evals from the CLI + the console UI / writing files
 
 ```python
-check_integrity_scores = []
-extract_total_cost_scores = []
+@ls.task()
+def eval_agent(subset: str | None = None):
+    dataset = InvoiceDataset(subset)
 
-@ai.hook(check_integrity, model="o1-preview")
-def hook_check_integrity(input, output, row):
-    score = output == row.targets.is_corrupted
-    check_integrity_scores.append(score)
+    check_integrity_scores = []
+    extract_total_cost_scores = []
 
-@ai.hook(extract_total_cost, model="o1-preview")
-def hook_extract_total_cost(input, output, row):
-    score = output - row.targets.total_cost
-    extract_total_cost_scores.append(score)
+    @ls.hook(check_integrity)
+    def hook_check_integrity(row: InvoiceRow, output, *args, **kwargs):
+        score = output == row.contains_error
+        check_integrity_scores.append(score)
 
-def report():
-    return f"""
-    check_integrity (% correct): {sum(check_integrity_scores) / len(check_integrity_scores)}
-    extract_total_cost (avg. error): {sum(extract_total_cost_scores) / len(extract_total_cost_scores)}
-    """
+    @ls.hook(extract_total_cost)
+    def hook_extract_total_cost(row: InvoiceRow, output, *args, **kwargs):
+        score = output - row.total_cost
+        extract_total_cost_scores.append(score)
 
-ai.run(
-    dataset=dataset,
-    main=process_invoice,
-    hooks=[hook_check_integrity, hook_extract_total_cost],
-    report=report,
-)
-```# agentlens
+    ls.run(
+        dataset=dataset,
+        hooks=[hook_check_integrity, hook_extract_total_cost],
+        main=process_invoice,
+    )
+
+    ls.write_text(
+        "report.md",
+        f"""
+        check_integrity (% correct): {sum(check_integrity_scores) / len(check_integrity_scores)}
+        extract_total_cost (avg. error): {sum(extract_total_cost_scores) / len(extract_total_cost_scores)}
+        """,
+    )
+```

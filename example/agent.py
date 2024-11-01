@@ -1,7 +1,7 @@
-from example.ai import ai
+from example.config import ai, ls
 
 
-@ai.task()
+@ls.task()
 async def process_invoice(invoice: str) -> float | str:
     looks_fine = await check_integrity(invoice)
 
@@ -11,7 +11,7 @@ async def process_invoice(invoice: str) -> float | str:
     return await extract_total_cost(invoice)
 
 
-@ai.task()
+@ls.task()
 async def check_integrity(invoice: str, model: str = "gpt-4o-mini") -> bool:
     return await ai.generate_object(
         model=model,
@@ -20,7 +20,7 @@ async def check_integrity(invoice: str, model: str = "gpt-4o-mini") -> bool:
     )
 
 
-@ai.task()
+@ls.task()
 async def generate_error_report(invoice: str) -> str:
     return await ai.generate_text(
         model="gpt-4o",
@@ -28,7 +28,7 @@ async def generate_error_report(invoice: str) -> str:
     )
 
 
-@ai.task()
+@ls.task()
 async def extract_total_cost(invoice: str, model: str = "gpt-4o") -> float:
     return await ai.generate_object(
         model=model,

@@ -1,23 +1,13 @@
 import asyncio
 import logging
 import random
-from functools import wraps
-from pathlib import Path
-from typing import Any, Awaitable, Callable, ParamSpec, Sequence, Type, TypeVar
+from typing import Any, Callable, ParamSpec, Sequence, Type, TypeVar
 
-import nest_asyncio
-from langfuse import Langfuse
-from langfuse.decorators import langfuse_context, observe
 from pydantic import BaseModel
 from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
 
-from agentlens.cache import TaskCache
-from agentlens.dataset import Dataset, Row
-from agentlens.hooks import Hook, Hooks
-from agentlens.log import create_run_log, get_run_dir
+from agentlens.dataset import Dataset
 from agentlens.provider import Message, Provider
-from agentlens.serialization import serialize_task_input, serialize_task_output
-from agentlens.utils import create_path
 
 logger = logging.getLogger(__name__)
 
@@ -29,23 +19,16 @@ RunT = TypeVar("RunT")
 
 
 class AI:
-    langfuse: Langfuse | None
     message: Type[Message] = Message
-    _dataset_dir: Path
-    _run_dir: Path
     _providers: dict[str, Provider]
+    # todo - need mechanism for spawning generations under the run
+    # lens: Lens
 
     def __init__(
         self,
         *,
-        dataset_dir: Path | str,
-        run_dir: Path | str,
-        langfuse: Langfuse | None = None,
         providers: Sequence[Provider] = (),
     ):
-        self.langfuse = langfuse
-        self._dataset_dir = create_path(dataset_dir)
-        self._run_dir = create_path(run_dir)
         self._providers = {provider.name: provider for provider in providers}
 
     def _create_messages(
@@ -173,7 +156,7 @@ class AI:
         max_retries: int = 3,
         **kwargs,
     ) -> T:
-        # inline types may have invalid __name__ attributes -- replace w/ default
+        # inline types may have invalid __name__ attributes -- replace w/ a default
         if hasattr(type, "__name__"):
             type.__name__ = "Response"
         provider, model_name = self._get_provider(model)
@@ -189,104 +172,3 @@ class AI:
             max_retries=max_retries,
             **kwargs,
         )
-
-    def run(
-        self,
-        *,
-        main: Callable[[Any], Awaitable[RunT]],
-        hooks: list[Callable[[Row], Hook]] | None = None,
-        dataset: Dataset,
-    ) -> list[RunT]:
-        # sketchy -- should only be used in evals
-        nest_asyncio.apply()
-
-        async def run_with_hooks(row: Row):
-            _hooks = [hook_factory(row) for hook_factory in (hooks or [])]
-            with Hooks.create(_hooks):
-                return await main(row)
-
-        @observe()
-        async def run_all():
-            url = langfuse_context.get_current_trace_url()
-            if url:
-                print(f"View trace: {url}")
-            tasks = [run_with_hooks(row) for row in dataset]
-            return await asyncio.gather(*tasks)
-
-        with TaskCache.enable(self._dataset_dir / "cache"):
-            with create_run_log(self._run_dir) as log:
-                return asyncio.run(run_all(langfuse_observation_id=log.run_id))
-
-    def hook(self, target_func: Callable, **kwargs) -> Callable[[Callable], Callable[[Row], Hook]]:
-        def decorator(cb: Callable) -> Callable[[Row], Hook]:
-            @wraps(cb)
-            def wrapper(row: Row) -> Hook:
-                return Hook(cb, target_func, row, **kwargs)
-
-            return wrapper
-
-        return decorator
-
-    def score(
-        self,
-        name: str,
-        value: Any,
-        comment: str | None = None,
-    ):
-        if self.langfuse:
-            self.langfuse.score(
-                name=name,
-                value=value,
-                trace_id=langfuse_context.get_current_trace_id(),
-                observation_id=langfuse_context.get_current_observation_id(),
-                comment=comment,
-            )
-
-    def run_dir(self) -> Path:
-        return get_run_dir()
-
-    def task(
-        self,
-        cache: bool = False,
-        capture_input: bool = True,
-        capture_output: bool = True,
-    ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-        def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-            task_name = func.__name__
-
-            # conditionally cache
-            if cache:
-                func = TaskCache.cached(func)
-
-            @wraps(func)
-            @observe(capture_input=capture_input, capture_output=capture_output)
-            async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-                # execute function
-                output = await func(*args, **kwargs)
-
-                # run any hooks
-                if hooks := Hooks.get():
-                    for hook in hooks[task_name]:
-                        hook(output, *args, **kwargs)
-
-                # log to Langfuse
-                if self.langfuse:
-                    langfuse_context.update_current_observation(
-                        name=task_name,
-                        input=serialize_task_input(args, kwargs) if capture_input else None,
-                        output=serialize_task_output(output) if capture_output else None,
-                    )
-
-                return output
-
-            return wrapper
-
-        return decorator
-
-    def dataset(self, name: str) -> Callable[[Type[D]], Type[D]]:
-        def decorator(cls: Type[D]) -> Type[D]:
-            cls.name = name
-            cls.dataset_dir = self._dataset_dir
-            return cls
-
-        return decorator

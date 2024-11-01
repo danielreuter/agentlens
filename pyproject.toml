@@ -19,6 +19,7 @@ joblib = "^1.4.2"
 pytest-asyncio = "^0.24.0"
 nest-asyncio = "^1.6.0"
 ruff = "^0.7.1"
+textual = "^0.85.1"
 
 
 [tool.poetry.group.dev.dependencies]

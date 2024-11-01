@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from example.ai import ai
 from agentlens.dataset import Dataset, Label, Row, subset
+from example.config import ls
 
 
 ## define your row schema and pass it into a dataset
@@ -18,7 +18,7 @@ class InvoiceRow(Row):
 
 
 # define dataset and pass it a name
-@ai.dataset("invoices")
+@ls.dataset("invoices")
 class InvoiceDataset(Dataset[InvoiceRow]): ...
 
 
@@ -51,7 +51,7 @@ dataset.save()  # saves the updated dataset, first ensuring it's in a valid stat
 # in the subset
 # this functionality integrates with the task runner to
 # organize and document your eval runs for you
-@ai.dataset("invoices")
+@ls.dataset("invoices")
 class InvoiceDataset(Dataset[InvoiceRow]):
     @subset()
     def september(self, row: InvoiceRow):

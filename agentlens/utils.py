@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -22,7 +23,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def create_id():
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def create_uuid() -> str:
     return str(uuid.uuid4())
 
 
