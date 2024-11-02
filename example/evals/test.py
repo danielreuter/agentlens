@@ -12,10 +12,12 @@ def bootstrap_labels(subset: str | None = None):
 
     @ls.hook(check_integrity, model="o1-preview")
     def hook_check_integrity(row: InvoiceRow, output, *args, **kwargs):
+        # ls.log(f"check_integrity: {row.contains_error}")
         row.contains_error = not output
 
     @ls.hook(extract_total_cost, model="o1-preview")
     def hook_extract_total_cost(row: InvoiceRow, output, *args, **kwargs):
+        # ls.log(f"extract_total_cost: {output}")
         row.total_cost = output
 
     async def main(row: InvoiceRow):

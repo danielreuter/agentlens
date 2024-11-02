@@ -9,6 +9,7 @@ from typing import (
     Awaitable,
     Callable,
     ParamSpec,
+    Sequence,
     Type,
     TypeVar,
     cast,
@@ -31,6 +32,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 D = TypeVar("D", bound=Dataset)
 P = ParamSpec("P")
 R = TypeVar("R")
+T = TypeVar("T", bound=Row)
 
 
 class Lens:
@@ -43,9 +45,11 @@ class Lens:
         *,
         dataset_dir: Path | str,
         runs_dir: Path | str,
+        editor: str = "cursor",
     ):
         self._dataset_dir = Path(dataset_dir)
         self._runs_dir = Path(runs_dir)
+        self._editor = editor
 
     @overload
     def task(
@@ -72,7 +76,6 @@ class Lens:
         def decorator(func: Callable[P, R]) -> Callable[P, R] | Callable[P, Awaitable[R]]:
             task_name = name or func.__name__
 
-            # conditionally cache
             if cache:
                 func = TaskCache.cached(func)
 
@@ -100,7 +103,8 @@ class Lens:
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                self._handle_exception(observation, e)
+                if observation is not None:
+                    observation.error = str(e)
                 raise
             finally:
                 self._cleanup_observation(observation)
@@ -123,7 +127,8 @@ class Lens:
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                self._handle_exception(observation, e)
+                if observation is not None:
+                    observation.error = str(e)
                 raise
             finally:
                 self._cleanup_observation(observation)
@@ -138,20 +143,21 @@ class Lens:
     def run(
         self,
         *,
-        main: Callable[[Row], Awaitable[R]] | Callable[[Row], R],
+        main: Callable[[T], Awaitable[R]] | Callable[[T], R],
         dataset: Dataset,
-        hooks: list[Callable[[Row], Hook]] | None = None,
-    ) -> list[R]:
+        hooks: Sequence[Callable[[T], Hook]] | None = None,
+    ) -> Sequence[R | None]:
         nest_asyncio.apply()
         run_key = self._create_run_key()
+        run_dir = self._runs_dir / run_key
         runs = []
-        results: list[R] = []
+        results: Sequence[R | None] = []
 
         for idx, row in enumerate(dataset):
             runs.append(
                 Run(
                     key=run_key,
-                    dir=self._runs_dir / f"row_{idx}",
+                    dir=run_dir / f"row_{idx}",
                     name=f"Row {idx}",
                     row=row,
                     hooks=self._initialize_hooks(row, hooks),
@@ -164,37 +170,45 @@ class Lens:
                 if asyncio.iscoroutinefunction(main):
                     results = await self._run_async(main, runs)
                 else:
-                    typed_main = cast(Callable[[Row], R], main)
+                    typed_main = cast(Callable[[T], R], main)
                     results = self._run_sync(typed_main, runs)
 
-        console = RunConsole(runs, execute)
+        console = RunConsole(runs, execute, editor=self._editor)
         console.run()
         return results
 
     def _run_sync(
         self,
-        main: Callable[[Row], R],
-        runs: list[Run],
-    ) -> list[R]:
+        main: Callable[[T], R],
+        runs: list[Run[T]],
+    ) -> list[R | None]:
         # maybe unnest if only one row
         results = []
         for run in runs:
             _run_context.set(run)
-            result = main(run.row)
+            try:
+                result = main(run.row)
+            except Exception as e:
+                run.observation.error = str(e)
+                result = None
             results.append(result)
         return results
 
     def _run_async(
         self,
-        main: Callable[[Row], Awaitable[R]],
-        runs: list[Run],
-    ) -> list[R]:
+        main: Callable[[T], Awaitable[R]],
+        runs: list[Run[T]],
+    ) -> list[R | None]:
         # maybe unnest if only one row
-        async def _run_one(run: Run) -> R:
+        async def _run_one(run: Run) -> R | None:
             _run_context.set(run)
-            return await main(run.row)
+            try:
+                return await main(run.row)
+            except Exception as e:
+                run.observation.error = str(e)
+                return None
 
-        async def _run_all() -> list[R]:
+        async def _run_all() -> list[R | None]:
             tasks = [_run_one(run) for run in runs]
             return await asyncio.gather(*tasks)
 
@@ -202,8 +216,8 @@ class Lens:
 
     def _initialize_hooks(
         self,
-        row: Row,
-        hook_factories: list[Callable[[Row], Hook]] | None,
+        row: T,
+        hook_factories: Sequence[Callable[[T], Hook]] | None,
     ) -> dict[str, list[Hook]]:
         hooks: dict[str, list[Hook]] = {}
         for hook_factory in hook_factories or []:
@@ -241,16 +255,6 @@ class Lens:
         run.observation_stack = stack + [observation]
         return observation
 
-    def _handle_exception(
-        self,
-        trace: Observation | None,
-        e: Exception,
-    ):
-        if trace:
-            trace.error = str(e)
-            self._cleanup_observation(trace)
-        raise e
-
     def _cleanup_observation(
         self,
         observation: Observation | None,
@@ -267,13 +271,13 @@ class Lens:
         if not stack:
             _run_context.set(None)
 
-    def hook(self, target_func: Callable, **kwargs) -> Callable[[Callable], Callable[[Row], Hook]]:
-        def decorator(cb: Callable) -> Callable[[Row], Hook]:
+    def hook(self, target_func: Callable, **kwargs) -> Callable[[Callable], Callable[[T], Hook]]:
+        def decorator(cb: Callable) -> Callable[[T], Hook]:
             @wraps(cb)
-            def wrapper(row: Row) -> Hook:
+            def wrapper(row: T) -> Hook:
                 return Hook(cb, target_func, row, **kwargs)
 
-            return wrapper
+            return wrapper  # type: ignore[return-value]
 
         return decorator
 
@@ -294,3 +298,31 @@ class Lens:
 
     def write_json(self, file_name: str, data: dict):
         pass
+
+    def log(self, message: str) -> None:
+        run = _run_context.get()
+        if run is None:  # not in evaluation mode
+            self._log.info(message)  # fallback to regular logging
+            return
+
+        stack = run.observation_stack
+        if not stack:
+            raise ValueError("Observation stack unexpectedly empty")
+        current_observation = stack[-1]
+        current_observation.add_log(message)
+
+    def write(self, name: str, content: str) -> None:
+        run = _run_context.get()
+        if run is None:  # not in evaluation mode
+            self._log.warning("Attempting to write file outside of run context")
+            return
+
+        stack = run.observation_stack
+        if not stack:
+            raise ValueError("Observation stack unexpectedly empty")
+
+        current_observation = stack[-1]
+        current_observation.add_file(name, content)
+
+        filepath = run.dir / name
+        filepath.write_text(content)
