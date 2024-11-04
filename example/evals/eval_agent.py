@@ -2,26 +2,11 @@ from dataclasses import dataclass
 
 from example.agent import check_integrity, extract_total_cost, process_invoice
 from example.config import ls
-from example.datasets import InvoiceDataset
+from example.datasets import InvoiceDataset, InvoiceExample
 
 # hooks can be pre or post
 # pre takes example, state, *args, **kwargs
 # post takes example, state, output, *args, **kwargs
-
-
-@ls.hook(check_integrity, "pre")
-def hook_check_integrity(example, state, *args, **kwargs):
-    kwargs["model"] = "o1-preview"
-
-
-@ls.hook(extract_total_cost, "pre")
-def hook_extract_total_cost_pre(example, state, *args, **kwargs):
-    kwargs["model"] = "o1-preview"
-
-
-@ls.hook(extract_total_cost, "post")
-def hook_extract_total_cost_post(example, state, output, *args, **kwargs):
-    example.total_cost = output
 
 
 # an eval is a task that does:
@@ -34,67 +19,110 @@ def hook_extract_total_cost_post(example, state, output, *args, **kwargs):
 # note: this is only implicitly an abstraction -- it's just a task!
 
 
+@ls.hook(check_integrity, "wrap")
+def boot_check_integrity(example, state, *args, **kwargs):
+    kwargs["model"] = "o1-preview"
+    output = yield args, kwargs
+    example.contains_error = not output
+
+
+@ls.hook(extract_total_cost, "wrap")
+def boot_extract_total_cost(example, state, *args, **kwargs):
+    kwargs["model"] = "o1-preview"
+    output = yield args, kwargs
+    example.total_cost = output
+
+
+@ls.task()
+def bootstrap_invoice_labels():
+    dataset = InvoiceDataset("september")
+    with ls.context(
+        hooks=[
+            boot_check_integrity,
+            boot_extract_total_cost,
+        ]
+    ):
+
+        def eval(example):
+            return process_invoice(example.markdown)
+
+        dataset.run(eval)
+        dataset.save()
+
+
+# label it as a task so that the "run" abstraction remains!
+
+
 @dataclass
-class EvalState:
-    total_costs: list[float]
+class State:
+    total_cost_diffs: list[float]
+    correct_integrities: list[bool]
+
+
+@ls.hook(check_integrity, "post")
+def hook_check_integrity(example: InvoiceExample, state: State, output, *args, **kwargs):
+    score = output == example.contains_error
+    state.correct_integrities.append(score)
+
+
+@ls.hook(extract_total_cost, "post")
+def hook_extract_total_cost(example: InvoiceExample, state: State, output, *args, **kwargs):
+    score = output == example.total_cost
+    state.total_cost_diffs.append(score)
+
+
+def eval_process_invoice(subset):
+    dataset = InvoiceDataset(subset)
+    state = State(total_cost_diffs=[], correct_integrities=[])
+
+    with ls.context(
+        state=state,
+        hooks=[
+            hook_check_integrity,
+            hook_extract_total_cost,
+        ],
+    ):
+
+        def eval(example):
+            return process_invoice(example.markdown)
+
+        results = dataset.run(eval)
+
+        (ls / "report.md").write_text(f"""
+            Average total cost error: {sum(state.total_cost_diffs) / len(state.total_cost_diffs)}  
+            Percent integrity correct: {sum(state.correct_integrities) / len(state.correct_integrities)}
+            First result: {results[0]}
+        """)
 
 
 @ls.task()
 async def eval_process_invoice_async(subset):
     dataset = InvoiceDataset(subset)
-    state = EvalState(total_costs=[])
+    state = State(total_cost_diffs=[], correct_integrities=[])
 
-    async def eval(example):
-        with ls.context(
-            example=example,
-            state=state,
-            hooks=[
-                hook_check_integrity,
-                hook_extract_total_cost_pre,
-                hook_extract_total_cost_post,
-            ],
-            cache=[check_integrity, extract_total_cost],
-        ):
+    async with ls.eval_context(
+        state=state,
+        hooks=[
+            hook_check_integrity,
+            hook_extract_total_cost,
+        ],
+        cache=[check_integrity, extract_total_cost],
+    ):
+
+        async def eval(example):
             return await process_invoice(example.markdown)
 
-    results = await ls.gather(*[eval(example) for example in dataset])
+        results = await dataset.run(eval)
 
-    (ls / "report.md").write_text(f"""
-        Total cost across all examples: {sum(state.total_costs)}  
-        First example: {results[0]}
-    """)
-
-    dataset.save()
-
-
-@ls.task()
-def eval_process_invoice_sync(subset):
-    dataset = InvoiceDataset(subset)
-    state = {}
-
-    def eval(example):
-        with ls.context(
-            example=example,
-            state=state,
-            hooks=[
-                hook_check_integrity,
-                hook_extract_total_cost_pre,
-                hook_extract_total_cost_post,
-            ],
-            cache=[check_integrity, extract_total_cost],
-        ):
-            return process_invoice(example.markdown)
-
-    results = [eval(example) for example in ls.iter(dataset)]
-
-    (ls / "report.md").write_text(f"""
-        Total cost across all examples: {sum(state.total_costs)}
-        First example: {results[0]}
-    """)
-
-    dataset.save()
+        (ls / "report.md").write_text(f"""
+            Average total cost error: {sum(state.total_cost_diffs) / len(state.total_cost_diffs)}  
+            Percent integrity correct: {sum(state.correct_integrities) / len(state.correct_integrities)}
+            First result: {results[0]}
+        """)
 
 
+# def inject_kwargs(example, state, *args, **kwargs):
+#     kwargs["model"] = "o1-preview"
 ## alternative hook patterns -- meta hooks
 
 # def read_cost(example, output):
@@ -114,3 +142,4 @@ def eval_process_invoice_sync(subset):
 #         cache=[check_integrity, extract_total_cost],
 #     ):
 #         return process_invoice(example.markdown)
+#

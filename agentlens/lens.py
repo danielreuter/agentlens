@@ -8,6 +8,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Iterable,
+    Iterator,
     Literal,
     ParamSpec,
     Sequence,
@@ -19,6 +21,7 @@ from typing import (
 
 import nest_asyncio
 import petname
+import tqdm
 
 from agentlens.cache import TaskCache
 from agentlens.console import RunConsole
@@ -339,3 +342,24 @@ class Lens:
         if run is None:
             raise ValueError("Cannot use path operations outside of run context")
         return run.dir / str(other)
+
+    def iter(self, iterable: Iterable[T], desc: str | None = None) -> Iterator[T]:
+        return tqdm.tqdm(iterable, desc=desc)
+
+    async def gather(self, *coros: Awaitable[T]) -> list[T]:
+        return await asyncio.gather(*coros)
+
+    def context(
+        self,
+        example: Example,
+        state: Any,
+        hooks: Sequence[Hook] | None = None,
+        cache: Sequence[Callable] | None = None,
+    ) -> None:
+        pass
+
+    def eval(self, example: T) -> None:
+        pass
+
+    def eval_context(self):
+        pass

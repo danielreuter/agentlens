@@ -10,7 +10,7 @@ pip install agentlens
 
 - **Decorator-driven logic**—define arbitrarily complex scaffolds and evaluations by composing functions
 - **Expressive evaluation framework**—run evals with hooks for full control over your agent's computation graph
-- **ORM for datasets**—quickly bootstrap type-safe, validated datasets with zero boilerplate
+- **Type-safe datasets**—bootstrap type-safe, validated datasets with zero boilerplate
 - **Built-in observability**—easy integration with Langfuse
 - **Clean inference API**—call models using a syntax inspired by Vercel's very elegant [AI SDK](https://sdk.vercel.ai/docs/introduction)
 
@@ -83,7 +83,6 @@ def some_task(some_input: str) -> str:
 
 The `task` decorator takes the following optional arguments:
 - `name: str | None = None`--a name for the task, which will be used in the UI and in logging
-- `cache: bool = False`--cache the input/output of the task for use in evaluations
 - `max_retries: int = 0`--number of retries on failure, defaults to 0
 
 ## Inference
@@ -166,43 +165,51 @@ A `Dataset` is defined by a `Row` schema and a name. The name will identify it i
 
 ```python
 from datetime import datetime
-from agentlens import Dataset, Label, Row
+from agentlens import Dataset, Example, Label
 
 
-class InvoiceRow(Row):
-    markdown: str 
-    date_created: datetime  
-    total_cost: float = Label()  
-    contains_error: bool = Label()  
-
-# define dataset and give it a name
-@ls.dataset("invoices")
-class InvoiceDataset(Dataset[InvoiceRow]): 
-
-    # define subsets as filters on the rows
-    # the name is the argument passed to `subset`, defaulting to the function name
-    @subset("september")
-    def september(self, row: InvoiceRow):
-        return row.date_created.month == 9
+class InvoiceExample(Example):
+    markdown: str
+    date: str
+    total_cost: float = Label()
+    contains_error: bool = Label()
 
 
-# create and add rows (labels can be added later)
-row1 = InvoiceRow(markdown="invoice1...")
-row2 = InvoiceRow(markdown="invoice2...")
+# define dataset and pass it a name
+class InvoiceDataset(Dataset[InvoiceExample]):
+    def __init__(self, subset: str | None = None):
+        super().__init__(name="invoices", lens=ls, subset=subset)
 
-# initialize dataset and add rows
-dataset = InvoiceDataset("september")
-InvoiceDataset.extend([row1, row2])
+    def filter(self, row: InvoiceExample):
+        if self.subset == "september":
+            return row.date_created.month == 9
+        else:
+            raise ValueError("Subset not implemented")
+
+
+# define some rows (Labels can be added later)
+example1 = InvoiceExample(markdown="invoice1...", date="2024-09-01")
+example2 = InvoiceExample(markdown="invoice2...", date="2024-09-02")
+
+# load the dataset
+dataset = InvoiceDataset()
+
+# adds rows, initializing the file if necessary
+dataset.extend([example1, example2])
+
+# iterate over the rows
+for row in dataset:
+    print(row.markdown)  # type-safe
 
 # access rows by index or ID
-first_row = dataset[0]
-specific_row = dataset["some_row_id"]
+first_example = dataset[0]
+specific_example = dataset["some_example_id"]
 
 # labels are type-safe and validated
-first_row.total_cost = 100  # set a label
-print(first_row.total_cost)  # access a label (throws error if not set)
+first_example.total_cost = 100  # set a Label
+print(first_example.total_cost)  # access a Label (throws error if not set)
 
-# save changes
+# save changes, ensuring the dataset is in a valid state1
 dataset.save()
 
 # load a specific subset
@@ -252,30 +259,44 @@ async def extract_total_cost(invoice: str, model: str = "gpt-4o") -> float:
     )
 ```
 
-The first thing we'll want to do is bootstrap targets for our `InvoiceDataset`. This is easy to do using the hooks system. 
+The first thing we'll want to do is bootstrap labels for our `InvoiceDataset`. This is easy to do using the hooks system. 
 
 We will use hooks to:
 1. Modify the `check_integrity` and `extract_total_cost` tasks to use the `o1-preview` model, which is the most expensive and capable model available
-2. Tap into the execution of these functions to write the results to the dataset as target labels
+2. Write the results to the dataset as target labels
 
 ```python
-dataset = InvoiceDataset("september")
+@ls.hook(check_integrity, "wrap")
+def boot_check_integrity(example, state, *args, **kwargs):
+    kwargs["model"] = "o1-preview"
+    output = yield args, kwargs
+    example.contains_error = not output
 
-@ls.hook(check_integrity, model="o1-preview")
-def hook_check_integrity(row: InvoiceRow, output, *args, **kwargs):
-    row.contains_error = not output
 
-@ls.hook(extract_total_cost, model="o1-preview")
-def hook_extract_total_cost(row: InvoiceRow, output, *args, **kwargs):
-    row.total_cost = output
+@ls.hook(extract_total_cost, "wrap")
+def boot_extract_total_cost(example, state, *args, **kwargs):
+    kwargs["model"] = "o1-preview"
+    output = yield args, kwargs
+    example.total_cost = output
 
-ls.run(
-    main=process_invoice,
-    dataset=dataset,
-    hooks=[hook_check_integrity, hook_extract_total_cost],
-)
 
-dataset.save()
+@ls.task()
+def bootstrap_invoice_labels():
+    dataset = InvoiceDataset("september")
+    with ls.context(
+        hooks=[
+            boot_check_integrity,
+            boot_extract_total_cost,
+        ]
+    ):
+
+        def eval(example):
+            return process_invoice(example.markdown)
+
+        dataset.run(eval)
+        dataset.save()
+
+bootstrap_invoice_labels()
 ```
 
 Now that we have labels, we can evaluate the `check_integrity` and `extract_total_cost` tasks as they were originally defined.
@@ -283,34 +304,74 @@ Now that we have labels, we can evaluate the `check_integrity` and `extract_tota
 TODO: describe how to run evals from the CLI + the console UI / writing files
 
 ```python
-@ls.task()
-def eval_agent(subset: str | None = None):
+
+@dataclass
+class State:
+    total_cost_diffs: list[float]
+    correct_integrities: list[bool]
+
+
+@ls.hook(check_integrity, "post")
+def hook_check_integrity(example, state, output, *args, **kwargs):
+    score = output == example.contains_error
+    state.correct_integrities.append(score)
+
+
+@ls.hook(extract_total_cost, "post")
+def hook_extract_total_cost(example, state, output, *args, **kwargs):
+    score = output == example.total_cost
+    state.total_cost_diffs.append(score)
+
+
+def eval_process_invoice(subset):
     dataset = InvoiceDataset(subset)
+    state = State(total_cost_diffs=[], correct_integrities=[])
 
-    check_integrity_scores = []
-    extract_total_cost_scores = []
+    with ls.context(
+        state=state,
+        hooks=[
+            hook_check_integrity,
+            hook_extract_total_cost,
+        ],
+    ):
 
-    @ls.hook(check_integrity)
-    def hook_check_integrity(row: InvoiceRow, output, *args, **kwargs):
-        score = output == row.contains_error
-        check_integrity_scores.append(score)
+        def eval(example):
+            return process_invoice(example.markdown)
 
-    @ls.hook(extract_total_cost)
-    def hook_extract_total_cost(row: InvoiceRow, output, *args, **kwargs):
-        score = output - row.total_cost
-        extract_total_cost_scores.append(score)
+        results = dataset.run(eval)
 
-    ls.run(
-        dataset=dataset,
-        hooks=[hook_check_integrity, hook_extract_total_cost],
-        main=process_invoice,
-    )
+        (ls / "report.md").write_text(f"""
+            Average total cost error: {sum(state.total_cost_diffs) / len(state.total_cost_diffs)}  
+            Percent integrity correct: {sum(state.correct_integrities) / len(state.correct_integrities)}
+            First result: {results[0]}
+        """)
+```
 
-    ls.write_text(
-        "report.md",
-        f"""
-        check_integrity (% correct): {sum(check_integrity_scores) / len(check_integrity_scores)}
-        extract_total_cost (avg. error): {sum(extract_total_cost_scores) / len(extract_total_cost_scores)}
-        """,
-    )
+This process is I/O bound, so we'll want to run it asynchronously. The library maxes out your call rate on a per-model basis and prioritizes completing tasks in order. 
+
+```python
+@ls.task()
+async def eval_process_invoice_async(subset):
+    dataset = InvoiceDataset(subset)
+    state = State(total_cost_diffs=[], correct_integrities=[])
+
+    async with ls.eval_context(
+        state=state,
+        hooks=[
+            hook_check_integrity,
+            hook_extract_total_cost,
+        ],
+        cache=[check_integrity, extract_total_cost],
+    ):
+
+        async def eval(example):
+            return await process_invoice(example.markdown)
+
+        results = await dataset.run(eval)
+
+        (ls / "report.md").write_text(f"""
+            Average total cost error: {sum(state.total_cost_diffs) / len(state.total_cost_diffs)}  
+            Percent integrity correct: {sum(state.correct_integrities) / len(state.correct_integrities)}
+            First result: {results[0]}
+        """)
 ```

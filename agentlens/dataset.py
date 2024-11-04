@@ -80,6 +80,9 @@ class Dataset(Generic[E]):
         else:
             self.examples = rows
 
+    def run(self):
+        pass
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         for base in cls.__orig_bases__:

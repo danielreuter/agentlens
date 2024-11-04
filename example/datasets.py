@@ -1,4 +1,4 @@
-from agentlens.dataset import Dataset, Example, Label, subset
+from agentlens.dataset import Dataset, Example, Label
 from example.config import ls
 
 
@@ -8,11 +8,14 @@ class InvoiceExample(Example):
     contains_error: bool = Label()
 
 
-@ls.dataset("invoices")
 class InvoiceDataset(Dataset[InvoiceExample]):
-    @subset()
-    def september(self, row: InvoiceExample):
-        return row.date_created.month == 9
+    def __init__(self, subset: str | None):
+        super().__init__(name="invoices", lens=ls, subset=subset)
+
+    def filter(self, row: InvoiceExample):
+        if self.subset == "september":
+            return row.date_created.month == 9
+        return True
 
 
 dataset = InvoiceDataset()
