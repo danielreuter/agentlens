@@ -7,11 +7,11 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from agentlens.dataset import Row
+from agentlens.dataset import Example
 from agentlens.hooks import Hook
 from agentlens.utils import now
 
-T = TypeVar("T", bound=Row)
+T = TypeVar("T", bound=Example)
 
 
 class Log(BaseModel):
@@ -64,12 +64,12 @@ class Observation(BaseModel):
 
 
 class Run(Generic[T]):
-    def __init__(self, key: str, dir: Path, name: str, row: T, hooks: dict[str, list[Hook]]):
+    def __init__(self, key: str, dir: Path, name: str, example: T, hooks: dict[str, list[Hook]]):
         self.key = key
         self.dir = dir.resolve()
         self.dir.mkdir(parents=True, exist_ok=True)
         self.hooks = hooks
-        self.row = row
+        self.example = example
         self.observation = Observation(name=name)
         self.observation_stack: list[Observation] = [self.observation]
 

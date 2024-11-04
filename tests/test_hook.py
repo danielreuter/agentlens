@@ -1,15 +1,15 @@
 import pytest
 
 from agentlens import AI
-from agentlens.dataset import Dataset, Row
+from agentlens.dataset import Dataset, Example
 from tests.conftest import MockInput
 
 
-class TestRow(Row):
+class TestRow(Example):
     value: int
 
 
-class CaptureRow(Row):
+class CaptureRow(Example):
     x: int
     expected_output: int
 
@@ -81,7 +81,7 @@ async def test_hook_with_pydantic_models(ai, ai_fixture):
     multiply = ai_fixture["multiply_with_logging"]
     results = []
 
-    class MultiplyRow(Row):
+    class MultiplyRow(Example):
         value: int
         multiplier: float
 

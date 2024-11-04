@@ -31,7 +31,7 @@ def Label(
     return Field(default=default, **kwargs)
 
 
-class Row(BaseModel):
+class Example(BaseModel):
     """
     A row in a Dataset. Will not raise validation errors if fields designated
     as Labels are missing
@@ -48,7 +48,7 @@ class Row(BaseModel):
     # TODO: implement __setattr__ with validation at set-time instead of save-time
 
 
-RowT = TypeVar("RowT", bound=Row)
+E = TypeVar("E", bound=Example)
 
 
 class DatasetMetadata(BaseModel):
@@ -57,28 +57,28 @@ class DatasetMetadata(BaseModel):
     last_modified: datetime
 
 
-class DatasetFile(BaseModel, Generic[RowT]):
+class DatasetFile(BaseModel, Generic[E]):
     metadata: DatasetMetadata
-    rows: list[RowT]
+    examples: list[E]
 
 
-class Dataset(Generic[RowT]):
+class Dataset(Generic[E]):
     name: ClassVar[str]
     dataset_dir: ClassVar[Path]
     subset: str | None
-    rows: list[RowT]
-    row: ClassVar[Type[RowT]]
-    _file: DatasetFile[RowT]
+    examples: list[E]
+    example: ClassVar[Type[E]]
+    _file: DatasetFile[E]
 
     def __init__(self, subset: str | None = None):
         self.subset = subset
         self._file = self._read_file()
-        rows = self._file.rows
+        rows = self._file.examples
         if subset:
-            subset_rows, _ = self.split_rows(subset, rows)
-            self.rows = subset_rows
+            subset_rows, _ = self.split_examples(subset, rows)
+            self.examples = subset_rows
         else:
-            self.rows = rows
+            self.examples = rows
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -86,9 +86,9 @@ class Dataset(Generic[RowT]):
             if getattr(base, "__origin__", None) is Dataset:
                 args = base.__args__
                 if args:
-                    cls.row = args[0]
+                    cls.example = args[0]
                     break
-        if cls.row is None:
+        if cls.example is None:
             raise ValueError("Dataset must specify a row type")
 
     @property
@@ -99,7 +99,7 @@ class Dataset(Generic[RowT]):
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
-    def _read_file(self) -> DatasetFile[RowT]:
+    def _read_file(self) -> DatasetFile[E]:
         if not self.file_path.exists():
             return DatasetFile(
                 metadata=DatasetMetadata(
@@ -107,12 +107,12 @@ class Dataset(Generic[RowT]):
                     created_at=datetime.now(),
                     last_modified=datetime.now(),
                 ),
-                rows=[],
+                examples=[],
             )
         json_str = self.file_path.read_text()
-        return DatasetFile[self.row].model_validate_json(json_str)
+        return DatasetFile[self.example].model_validate_json(json_str)
 
-    def split_rows(self, subset: str, rows: list[RowT]) -> tuple[list[RowT], list[RowT]]:
+    def split_examples(self, subset: str, examples: list[E]) -> tuple[list[E], list[E]]:
         if not hasattr(self, subset):
             raise ValueError(f"Subset filter '{subset}' not found")
 
@@ -120,57 +120,57 @@ class Dataset(Generic[RowT]):
         if not hasattr(filter_method, SUBSET_FILTER_FN_INDICATOR):
             raise ValueError(f"'{subset}' is not a subset filter")
 
-        subset_rows = []
-        other_rows = []
+        subset_examples = []
+        other_examples = []
 
-        for row in rows:
-            if filter_method(row):
-                subset_rows.append(row)
+        for example in examples:
+            if filter_method(example):
+                subset_examples.append(example)
             else:
-                other_rows.append(row)
+                other_examples.append(example)
 
-        return subset_rows, other_rows
+        return subset_examples, other_examples
 
-    def extend(self, rows: list[RowT]) -> None:
-        """Appends rows to the dataset in-place"""
-        self.rows.extend(rows)
+    def extend(self, examples: list[E]) -> None:
+        """Appends examples to the dataset in-place"""
+        self.examples.extend(examples)
 
     def clear(self) -> None:
         """Clears the dataset in-place"""
-        self.rows.clear()
+        self.examples.clear()
 
     def save(self) -> None:
         """
         Saves the current version of the subset to disk, leaving other rows unchanged.
         """
         # concatenate current subset's rows with the rest of the dataset's rows
-        new_rows = self.rows
+        new_rows = self.examples
         if self.subset:
-            _, other_rows = self.split_rows(self.subset, self._file.rows)
-            new_rows.extend(other_rows)
+            _, other_examples = self.split_examples(self.subset, self._file.examples)
+            new_rows.extend(other_examples)
 
         # overwrite current dataset with new rows
-        self._file.rows = new_rows
+        self._file.examples = new_rows
         json_str = self._file.model_dump_json(indent=2, exclude_defaults=True)
         self.file_path.write_text(json_str)
 
-    def __iter__(self) -> Iterator[RowT]:
-        return iter(self.rows)
+    def __iter__(self) -> Iterator[E]:
+        return iter(self.examples)
 
-    def __getitem__(self, key: Union[int, str, Any]) -> RowT:
+    def __getitem__(self, key: Union[int, str, Any]) -> E:
         if isinstance(key, int):
-            if 0 <= key < len(self.rows):
-                return self.rows[key]
+            if 0 <= key < len(self.examples):
+                return self.examples[key]
             raise DatasetIndexError(f"Row index {key} out of range")
         elif isinstance(key, str):
-            for row in self:
-                if row.id == key:
-                    return row
+            for example in self:
+                if example.id == key:
+                    return example
             raise DatasetIndexError(f"Row id '{key}' not found")
         raise TypeError(f"Invalid key type: {type(key)}")
 
     def __len__(self):
-        return len(self.rows)
+        return len(self.examples)
 
 
 def subset():

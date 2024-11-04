@@ -8,6 +8,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Literal,
     ParamSpec,
     Sequence,
     Type,
@@ -21,7 +22,7 @@ import petname
 
 from agentlens.cache import TaskCache
 from agentlens.console import RunConsole
-from agentlens.dataset import Dataset, Row
+from agentlens.dataset import Dataset, Example
 from agentlens.hooks import Hook
 from agentlens.trace import Observation, Run
 from agentlens.utils import now
@@ -32,7 +33,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 D = TypeVar("D", bound=Dataset)
 P = ParamSpec("P")
 R = TypeVar("R")
-T = TypeVar("T", bound=Row)
+T = TypeVar("T", bound=Example)
 
 
 class Lens:
@@ -153,14 +154,14 @@ class Lens:
         runs = []
         results: Sequence[R | None] = []
 
-        for idx, row in enumerate(dataset):
+        for idx, example in enumerate(dataset):
             runs.append(
                 Run(
                     key=run_key,
-                    dir=run_dir / f"row_{idx}",
-                    name=f"Row {idx}",
-                    row=row,
-                    hooks=self._initialize_hooks(row, hooks),
+                    dir=run_dir / f"example_{idx}",
+                    name=f"Example {idx}",
+                    example=example,
+                    hooks=self._initialize_hooks(example, hooks),
                 )
             )
 
@@ -182,12 +183,12 @@ class Lens:
         main: Callable[[T], R],
         runs: list[Run[T]],
     ) -> list[R | None]:
-        # maybe unnest if only one row
+        # maybe unnest if only one example
         results = []
         for run in runs:
             _run_context.set(run)
             try:
-                result = main(run.row)
+                result = main(run.example)
             except Exception as e:
                 run.observation.error = str(e)
                 result = None
@@ -199,11 +200,11 @@ class Lens:
         main: Callable[[T], Awaitable[R]],
         runs: list[Run[T]],
     ) -> list[R | None]:
-        # maybe unnest if only one row
+        # maybe unnest if only one example
         async def _run_one(run: Run) -> R | None:
             _run_context.set(run)
             try:
-                return await main(run.row)
+                return await main(run.example)
             except Exception as e:
                 run.observation.error = str(e)
                 return None
@@ -216,12 +217,12 @@ class Lens:
 
     def _initialize_hooks(
         self,
-        row: T,
+        example: T,
         hook_factories: Sequence[Callable[[T], Hook]] | None,
     ) -> dict[str, list[Hook]]:
         hooks: dict[str, list[Hook]] = {}
         for hook_factory in hook_factories or []:
-            hook = hook_factory(row)
+            hook = hook_factory(example)
             target_name = hook.target.__name__
             if target_name not in hooks:
                 hooks[target_name] = []
@@ -271,11 +272,16 @@ class Lens:
         if not stack:
             _run_context.set(None)
 
-    def hook(self, target_func: Callable, **kwargs) -> Callable[[Callable], Callable[[T], Hook]]:
+    def hook(
+        self,
+        target_func: Callable,
+        type: Literal["pre", "post"] = "post",
+        **kwargs,
+    ) -> Callable[[Callable], Callable[[T], Hook]]:
         def decorator(cb: Callable) -> Callable[[T], Hook]:
             @wraps(cb)
-            def wrapper(row: T) -> Hook:
-                return Hook(cb, target_func, row, **kwargs)
+            def wrapper(example: T) -> Hook:
+                return Hook(cb, target_func, example, type=type, **kwargs)
 
             return wrapper  # type: ignore[return-value]
 
@@ -326,3 +332,10 @@ class Lens:
 
         filepath = run.dir / name
         filepath.write_text(content)
+
+    def __truediv__(self, other: str | Path) -> Path:
+        """Allow using / operator to create paths relative to run_dir."""
+        run = _run_context.get()
+        if run is None:
+            raise ValueError("Cannot use path operations outside of run context")
+        return run.dir / str(other)

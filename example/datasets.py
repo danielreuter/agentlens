@@ -1,17 +1,17 @@
-from agentlens.dataset import Dataset, Label, Row, subset
+from agentlens.dataset import Dataset, Example, Label, subset
 from example.config import ls
 
 
-class InvoiceRow(Row):
+class InvoiceExample(Example):
     markdown: str
     total_cost: float = Label()
     contains_error: bool = Label()
 
 
 @ls.dataset("invoices")
-class InvoiceDataset(Dataset[InvoiceRow]):
+class InvoiceDataset(Dataset[InvoiceExample]):
     @subset()
-    def september(self, row: InvoiceRow):
+    def september(self, row: InvoiceExample):
         return row.date_created.month == 9
 
 
@@ -19,8 +19,8 @@ dataset = InvoiceDataset()
 dataset.clear()
 dataset.extend(
     [
-        InvoiceRow(markdown="test1"),
-        InvoiceRow(
+        InvoiceExample(markdown="test1"),
+        InvoiceExample(
             markdown="test2",
         ),
     ]

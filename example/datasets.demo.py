@@ -1,4 +1,4 @@
-from agentlens.dataset import Dataset, Label, Row, subset
+from agentlens.dataset import Dataset, Example, Label, subset
 from example.config import ls
 
 
@@ -8,7 +8,7 @@ from example.config import ls
 ## it will only error if you try to access a missing label
 ## this allows you to progressively bootstrap Labels
 ## and everything is type-safe (Labels are assumed to exist by your IDE)
-class InvoiceRow(Row):
+class InvoiceRow(Example):
     markdown: str
     total_cost: float = Label()
     contains_error: bool = Label()

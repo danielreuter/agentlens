@@ -3,10 +3,10 @@ from datetime import datetime
 import pytest
 from pytest import fixture
 
-from agentlens.dataset import Dataset, Label, Row, subset
+from agentlens.dataset import Dataset, Example, Label, subset
 
 
-class InvoiceRow(Row):
+class InvoiceRow(Example):
     markdown: str
     date_created: datetime
     total_cost: float = Label()

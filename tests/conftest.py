@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from agentlens import AI, Dataset, OpenAIProvider
-from agentlens.dataset import Row
+from agentlens.dataset import Example
 
 
 @pytest.fixture()
@@ -357,7 +357,7 @@ def edge_case_values():
 
 
 # Add these new fixtures
-class SimpleRow(Row):
+class SimpleRow(Example):
     x: int
 
 
