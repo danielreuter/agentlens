@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 from pytest import fixture
 
-from agentlens.dataset import Dataset, Example, Label, subset
+from agentlens.dataset import Dataset, Example, Label
 
 
 class InvoiceRow(Example):
@@ -14,20 +14,23 @@ class InvoiceRow(Example):
 
 
 @fixture
-def InvoiceDataset(ai):
-    @ai.dataset("invoices")
+def InvoiceDataset(ls):
     class InvoiceDataset(Dataset[InvoiceRow]):
-        @subset()
-        def contains_error(self, row: InvoiceRow) -> bool:
-            return row.contains_error
+        def __init__(self, subset: str | None = None):
+            super().__init__(name="invoices", lens=ls, subset=subset)
+
+        def filter(self, row: InvoiceRow) -> bool:
+            if self.subset == "errors":
+                return row.contains_error
+            return True
 
     return InvoiceDataset
 
 
 def test_dataset_initialization(InvoiceDataset):
     """Test that a new dataset initializes correctly with no rows."""
-    dataset = InvoiceDataset(None)
-    assert len(dataset.rows) == 0
+    dataset = InvoiceDataset()
+    assert len(dataset) == 0
 
 
 def test_label_validation(InvoiceDataset):
@@ -43,7 +46,7 @@ def test_label_validation(InvoiceDataset):
         markdown="invoice3...", date_created=datetime.now(), total_cost=100.0, contains_error=True
     )
 
-    dataset = InvoiceDataset(None)
+    dataset = InvoiceDataset()
     dataset.extend([row1, row2, row3])
 
     # Check missing fields raise appropriate errors
@@ -64,12 +67,12 @@ def test_dataset_append(InvoiceDataset):
     row1 = InvoiceRow(markdown="invoice1...", date_created=datetime.now())
     row2 = InvoiceRow(markdown="invoice2...", date_created=datetime.now())
 
-    dataset = InvoiceDataset(None)
+    dataset = InvoiceDataset()
     dataset.extend([row1, row2])
 
-    assert len(dataset.rows) == 2
-    assert dataset.rows[0].markdown == "invoice1..."
-    assert dataset.rows[1].markdown == "invoice2..."
+    assert len(dataset) == 2
+    assert dataset[0].markdown == "invoice1..."
+    assert dataset[1].markdown == "invoice2..."
 
 
 def test_access_by_index(InvoiceDataset):
@@ -80,18 +83,6 @@ def test_access_by_index(InvoiceDataset):
     dataset.extend([row1])
 
     retrieved_row = dataset[0]
-    assert retrieved_row.markdown == "invoice1..."
-
-
-def test_access_by_id(InvoiceDataset):
-    """Test accessing rows by their unique ID."""
-    row1 = InvoiceRow(markdown="invoice1...", date_created=datetime.now())
-    row_id = row1.id
-
-    dataset = InvoiceDataset(None)
-    dataset.extend([row1])
-
-    retrieved_row = dataset[row_id]
     assert retrieved_row.markdown == "invoice1..."
 
 
@@ -106,11 +97,11 @@ def test_saving_and_loading(InvoiceDataset):
     """Test saving a dataset to disk and loading it back."""
     row1 = InvoiceRow(markdown="invoice1...", date_created=datetime.now())
 
-    dataset = InvoiceDataset(None)
+    dataset = InvoiceDataset()
     dataset.extend([row1])
     dataset.save()
 
-    loaded_dataset = InvoiceDataset(None)
+    loaded_dataset = InvoiceDataset()
     assert len(loaded_dataset) == 1
     assert loaded_dataset[0].markdown == "invoice1..."
 
@@ -120,6 +111,6 @@ def test_subsets(InvoiceDataset):
     row1 = InvoiceRow(markdown="invoice1...", date_created=datetime.now(), contains_error=True)
     row2 = InvoiceRow(markdown="invoice2...", date_created=datetime.now(), contains_error=False)
 
-    dataset = InvoiceDataset(None)
+    dataset = InvoiceDataset()
     dataset.extend([row1, row2])
     dataset.save()

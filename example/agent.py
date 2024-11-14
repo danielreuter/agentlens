@@ -15,14 +15,15 @@ async def process_invoice(invoice: str) -> float | str:
 
 @ls.task()
 async def check_integrity(invoice: str, model: str = "gpt-4o-mini") -> bool:
-    # return await ai.generate_object(
+    # result = await ai.generate_object(
     #     model=model,
-    #     type=bool,
+    #     type=Think[bool],
     #     prompt=f"Return True if the invoice looks uncorrupted: {invoice.text}",
+    #     mock=get_message(invoice, user_id=user_id),
     # )
     await asyncio.sleep(3)
-    ls.log(f"check_integrity: {invoice}")
-    ls.write("invoice.txt", invoice)
+    # ls.log(f"check_integrity: {invoice}")
+    # ls.write("invoice.txt", invoice)
 
     return False
 
@@ -34,9 +35,9 @@ async def generate_error_report(invoice: str) -> str:
     #     prompt=f"Write an error report for this corrupted invoice: {invoice}",
     # )
     await asyncio.sleep(3)
-    ls.log(f"generate_error_report: {invoice}")
-    ls.write("error_report.txt", invoice)
-    raise Exception("shit")
+    # ls.log(f"generate_error_report: {invoice}")
+    # ls.write("error_report.txt", invoice)
+    # raise Exception("shit")
     return "shit"
 
 
@@ -48,6 +49,6 @@ async def extract_total_cost(invoice: str, model: str = "gpt-4o") -> float:
     #     prompt=f"Extract the total cost from this invoice: {invoice}",
     # )
     await asyncio.sleep(3)
-    ls.log(f"extract_total_cost: {invoice}")
-    ls.write("total_cost.txt", invoice)
+    # ls.log(f"extract_total_cost: {invoice}")
+    # ls.write("total_cost.txt", invoice)
     return 100.0

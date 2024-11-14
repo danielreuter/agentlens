@@ -1,24 +1,38 @@
+import asyncio
 import sys
 from importlib import import_module
 from pathlib import Path
-from typing import List
+from typing import Any, Callable
 
 import typer
+from typing_extensions import Annotated
+
+from agentlens.console import RunConsole
+from agentlens.trace import Run
 
 app = typer.Typer()
-
-# Create a subcommand group for the "run" command
 run_app = typer.Typer()
 app.add_typer(run_app, name="run")
 
 
-# Move the run function to be under the run_app group
+def wrap_function(func: Callable[[], Any], runs: list[Run]) -> Callable[[], Any]:
+    """Wrap the target function to capture its run context"""
+
+    async def wrapped():
+        if asyncio.iscoroutinefunction(func):
+            await func()
+        else:
+            func()
+
+    return wrapped
+
+
 @run_app.callback(invoke_without_command=True)
 def run(
-    file_path: str,
-    function_name: str,
-    args: List[str] = typer.Argument(None, help="Additional arguments to pass to the function"),
+    file_path: Annotated[str, typer.Argument(help="Path to the Python file to run")],
+    function_name: Annotated[str, typer.Argument(help="Name of the function to run")],
 ):
+    """Run a Python function with AgentLens console visualization"""
     try:
         # Convert file path to module path
         path = Path(file_path)
@@ -28,14 +42,8 @@ def run(
         # Convert path/to/file.py to path.to.file
         module_path = str(path.with_suffix("")).replace("/", ".").replace("\\", ".")
 
-        # Import the module normally, which will execute all dependencies
+        # Import the module
         module = import_module(module_path)
-
-        # # Debug: Print available functions with their full repr
-        # print("\nAvailable functions in module:")
-        # for name, item in module.__dict__.items():
-        #     if callable(item):
-        #         print(f"- {name}: {repr(item)}")
 
         # Get the function
         func = module.__dict__.get(function_name)
@@ -48,11 +56,21 @@ def run(
             raise typer.Exit(1)
 
         # Parse args into sys.argv for the function's CLI parser
-        sys.argv = [file_path, *args] if args else [file_path]
-        func()
+        sys.argv = [file_path]
+
+        # Create a list to store runs
+        runs: list[Run] = []
+
+        # Create and run the console app
+        wrapped_func = wrap_function(func, runs)
+        app = RunConsole(runs=runs, execute_callback=wrapped_func)
+        app.run()
 
     except ImportError as e:
         typer.echo(f"Failed to import module: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
 

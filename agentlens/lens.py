@@ -1,5 +1,4 @@
-import asyncio
-import inspect
+from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 from logging import getLogger
@@ -8,358 +7,307 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Coroutine,
+    Generator,
     Iterable,
     Iterator,
-    Literal,
     ParamSpec,
-    Sequence,
     Type,
     TypeVar,
     cast,
     overload,
 )
 
-import nest_asyncio
-import petname
 import tqdm
+from tqdm.asyncio import tqdm_asyncio
 
-from agentlens.cache import TaskCache
-from agentlens.console import RunConsole
-from agentlens.dataset import Dataset, Example
-from agentlens.hooks import Hook
-from agentlens.trace import Observation, Run
-from agentlens.utils import now
+from agentlens.hooks import GeneratorHook, Hook, Mock, MockMiss, convert_to_kwargs
+from agentlens.trace import Run
 
 _run_context: ContextVar[Run | None] = ContextVar("run_context", default=None)
+_do_mock: ContextVar[bool] = ContextVar("do_mock", default=False)
+_do_cache: ContextVar[bool] = ContextVar("do_cache", default=False)
 
 F = TypeVar("F", bound=Callable[..., Any])
-D = TypeVar("D", bound=Dataset)
 P = ParamSpec("P")
-R = TypeVar("R")
-T = TypeVar("T", bound=Example)
+R = TypeVar("R", covariant=True)
+T = TypeVar("T")
+C = TypeVar("C")
 
 
 class Lens:
     _log = getLogger("agentlens")
     _dataset_dir: Path
     _runs_dir: Path
+    _context_types: dict[str, Type]
+    _mock_registry: dict[Callable, Callable]
 
     def __init__(
         self,
         *,
         dataset_dir: Path | str,
         runs_dir: Path | str,
-        editor: str = "cursor",
     ):
         self._dataset_dir = Path(dataset_dir)
         self._runs_dir = Path(runs_dir)
-        self._editor = editor
+        self._context_types = {}
+        self._mock_registry = {}
+
+    @overload
+    def task(
+        self, fn: Callable[P, Coroutine[Any, Any, R]]
+    ) -> Callable[P, Coroutine[Any, Any, R]]: ...
 
     @overload
     def task(
         self,
+        *,
         name: str | None = None,
-        cache: bool = False,
-    ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]: ...
-
-    @overload  # type: ignore[misc]
-    def task(
-        self,
-        name: str | None = None,
-        cache: bool = False,
-    ) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+        mock: Callable | None = None,
+    ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]: ...
 
     def task(
         self,
+        fn: Callable[P, Coroutine[Any, Any, R]] | None = None,
+        *,
         name: str | None = None,
-        cache: bool = False,
+        mock: Callable | None = None,
     ) -> (
-        Callable[[Callable[P, R]], Callable[P, R]]
-        | Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]
+        Callable[P, Coroutine[Any, Any, R]]
+        | Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]
     ):
-        def decorator(func: Callable[P, R]) -> Callable[P, R] | Callable[P, Awaitable[R]]:
-            task_name = name or func.__name__
+        def decorator(
+            fn: Callable[P, Coroutine[Any, Any, R]],
+        ) -> Callable[P, Coroutine[Any, Any, R]]:
+            if name:
+                fn.__name__ = name
 
-            if cache:
-                func = TaskCache.cached(func)
+            if mock is not None:
+                setattr(fn, "_mock_fn", Mock(mock, fn))
 
-            if asyncio.iscoroutinefunction(func):
-                typed_func = cast(Callable[P, Awaitable[R]], func)
-                return self._async_task(typed_func, task_name)
-            else:
-                return self._sync_task(func, task_name)
+            @wraps(fn)
+            async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+                with self._provide_run(fn.__name__) as run:
+                    with run.create_observation(fn.__name__):
+                        hooks = run.hooks.get(fn.__name__, [])
 
-        return decorator  # type: ignore[return-value]
+                        # run pre-hooks
+                        generators: list[GeneratorHook] = []
+                        injected_kwargs: dict[str, Any] = {}
+                        for hook in hooks:
+                            # should produce None or a generator
+                            gen = hook(args, kwargs)
+                            if isinstance(gen, Generator):
+                                generators.append(gen)  # type: ignore[arg-type]
+                                new_injected_kwargs = next(gen)
+                                injected_kwargs.update(new_injected_kwargs)
 
-    def _async_task(
-        self,
-        func: Callable[P, Awaitable[R]],
-        name: str,
-    ) -> Callable[P, Awaitable[R]]:
-        @wraps(func)
-        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            observation = self._make_observation(
-                name=name,
-                is_method=self._is_method(func),
-                func_args=args,
-                func_kwargs=kwargs,
-            )
-            try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                if observation is not None:
-                    observation.error = str(e)
-                raise
-            finally:
-                self._cleanup_observation(observation)
+                        # rewrite task args/kwargs
+                        all_kwargs = convert_to_kwargs(fn, args, kwargs)
+                        all_kwargs.update(injected_kwargs)
 
-        return async_wrapper
+                        # execute task
+                        mock_fn = getattr(fn, "_mock_fn", None)
+                        try:
+                            if run.do_mock and mock_fn is not None:
+                                result = await mock_fn(**all_kwargs)
+                            else:
+                                raise MockMiss
+                        except MockMiss:
+                            result = await fn(**all_kwargs)
 
-    def _sync_task(
-        self,
-        func: Callable[P, R],
-        name: str,
-    ) -> Callable[P, R]:
-        @wraps(func)
-        def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            observation = self._make_observation(
-                name=name,
-                is_method=self._is_method(func),
-                func_args=args,
-                func_kwargs=kwargs,
-            )
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                if observation is not None:
-                    observation.error = str(e)
-                raise
-            finally:
-                self._cleanup_observation(observation)
+                        # send result to generator hooks
+                        for gen in generators:
+                            try:
+                                gen.send(result)
+                            except StopIteration:
+                                pass
 
-        return sync_wrapper
+                        return result
 
-    @staticmethod
-    def _is_method(func: Callable) -> bool:
-        params = inspect.signature(func).parameters
-        return "self" in params or "cls" in params
+            return wrapper
 
-    def run(
-        self,
-        *,
-        main: Callable[[T], Awaitable[R]] | Callable[[T], R],
-        dataset: Dataset,
-        hooks: Sequence[Callable[[T], Hook]] | None = None,
-    ) -> Sequence[R | None]:
-        nest_asyncio.apply()
-        run_key = self._create_run_key()
-        run_dir = self._runs_dir / run_key
-        runs = []
-        results: Sequence[R | None] = []
+        return decorator
 
-        for idx, example in enumerate(dataset):
-            runs.append(
-                Run(
-                    key=run_key,
-                    dir=run_dir / f"example_{idx}",
-                    name=f"Example {idx}",
-                    example=example,
-                    hooks=self._initialize_hooks(example, hooks),
-                )
-            )
+    def hook(self, target_fn: Callable[..., Awaitable[Any]]) -> Callable[[Callable], Hook]:
+        def decorator(hook_fn: Callable) -> Hook:
+            if not hasattr(hook_fn, "__name__"):
+                raise ValueError("Hook function must have a __name__ attribute")
+            return Hook(hook_fn, target_fn)
 
-        async def execute():
-            nonlocal results
-            with TaskCache.enable(self._dataset_dir / "cache"):
-                if asyncio.iscoroutinefunction(main):
-                    results = await self._run_async(main, runs)
-                else:
-                    typed_main = cast(Callable[[T], R], main)
-                    results = self._run_sync(typed_main, runs)
+        return decorator
 
-        console = RunConsole(runs, execute, editor=self._editor)
-        console.run()
-        return results
+    @property
+    def root(self) -> Path:
+        run = self._get_current_run()
+        return run.dir
 
-    def _run_sync(
-        self,
-        main: Callable[[T], R],
-        runs: list[Run[T]],
-    ) -> list[R | None]:
-        # maybe unnest if only one example
-        results = []
-        for run in runs:
-            _run_context.set(run)
-            try:
-                result = main(run.example)
-            except Exception as e:
-                run.observation.error = str(e)
-                result = None
-            results.append(result)
-        return results
-
-    def _run_async(
-        self,
-        main: Callable[[T], Awaitable[R]],
-        runs: list[Run[T]],
-    ) -> list[R | None]:
-        # maybe unnest if only one example
-        async def _run_one(run: Run) -> R | None:
-            _run_context.set(run)
-            try:
-                return await main(run.example)
-            except Exception as e:
-                run.observation.error = str(e)
-                return None
-
-        async def _run_all() -> list[R | None]:
-            tasks = [_run_one(run) for run in runs]
-            return await asyncio.gather(*tasks)
-
-        return asyncio.run(_run_all())
-
-    def _initialize_hooks(
-        self,
-        example: T,
-        hook_factories: Sequence[Callable[[T], Hook]] | None,
-    ) -> dict[str, list[Hook]]:
-        hooks: dict[str, list[Hook]] = {}
-        for hook_factory in hook_factories or []:
-            hook = hook_factory(example)
-            target_name = hook.target.__name__
-            if target_name not in hooks:
-                hooks[target_name] = []
-            hooks[target_name].append(hook)
-        return hooks
-
-    def _create_run_key(self) -> str:
-        timestamp = now().strftime("%Y%m%d_%H%M%S")
-        id = petname.generate(words=3, separator="_")
-        return f"{timestamp}_{id}"
-
-    def _make_observation(
-        self,
-        *,
-        name: str,
-        is_method: bool = False,
-        func_args: tuple = (),
-        func_kwargs: dict = {},
-        cache: bool = False,
-    ) -> Observation | None:
-        # todo - determine cache hit, log inputs/outputs
-        run = _run_context.get()
-        if run is None:  # not in evaluation mode
-            return None
-        stack = run.observation_stack.copy()
-        if not stack:
-            raise ValueError("Observation stack unexpectedly empty")
-        parent = stack[-1]
-        observation = Observation(name=name)
-        parent.add_child(observation)
-        run.observation_stack = stack + [observation]
-        return observation
-
-    def _cleanup_observation(
-        self,
-        observation: Observation | None,
-    ) -> None:
-        if observation is None:
-            return
-        observation.end()
+    def _get_current_run(self) -> Run:
         run = _run_context.get()
         if run is None:
-            raise ValueError("Observation stack unexpectedly empty")
-        stack = run.observation_stack.copy()
-        stack.pop()
-        run.observation_stack = stack
-        if not stack:
-            _run_context.set(None)
-
-    def hook(
-        self,
-        target_func: Callable,
-        type: Literal["pre", "post"] = "post",
-        **kwargs,
-    ) -> Callable[[Callable], Callable[[T], Hook]]:
-        def decorator(cb: Callable) -> Callable[[T], Hook]:
-            @wraps(cb)
-            def wrapper(example: T) -> Hook:
-                return Hook(cb, target_func, example, type=type, **kwargs)
-
-            return wrapper  # type: ignore[return-value]
-
-        return decorator
-
-    def score(self):
-        pass
-
-    def dataset(self, name: str) -> Callable[[Type[D]], Type[D]]:
-        def decorator(cls: Type[D]) -> Type[D]:
-            cls.name = name
-            cls.dataset_dir = self._dataset_dir
-            return cls
-
-        return decorator
-
-    # todo - nest this in observation
-    def write_text(self, file_name: str, text: str):
-        (self._runs_dir / file_name).write_text(text)
-
-    def write_json(self, file_name: str, data: dict):
-        pass
-
-    def log(self, message: str) -> None:
-        run = _run_context.get()
-        if run is None:  # not in evaluation mode
-            self._log.info(message)  # fallback to regular logging
-            return
-
-        stack = run.observation_stack
-        if not stack:
-            raise ValueError("Observation stack unexpectedly empty")
-        current_observation = stack[-1]
-        current_observation.add_log(message)
-
-    def write(self, name: str, content: str) -> None:
-        run = _run_context.get()
-        if run is None:  # not in evaluation mode
-            self._log.warning("Attempting to write file outside of run context")
-            return
-
-        stack = run.observation_stack
-        if not stack:
-            raise ValueError("Observation stack unexpectedly empty")
-
-        current_observation = stack[-1]
-        current_observation.add_file(name, content)
-
-        filepath = run.dir / name
-        filepath.write_text(content)
+            raise ValueError("Attempted to access current Run outside of a run context")
+        return run
 
     def __truediv__(self, other: str | Path) -> Path:
-        """Allow using / operator to create paths relative to run_dir."""
-        run = _run_context.get()
-        if run is None:
-            raise ValueError("Cannot use path operations outside of run context")
-        return run.dir / str(other)
+        return self.root / str(other)
 
     def iter(self, iterable: Iterable[T], desc: str | None = None) -> Iterator[T]:
         return tqdm.tqdm(iterable, desc=desc)
 
-    async def gather(self, *coros: Awaitable[T]) -> list[T]:
-        return await asyncio.gather(*coros)
+    async def gather(self, *coros: Awaitable[T], desc: str | None = None) -> list[T]:
+        return await tqdm_asyncio.gather(*coros, desc=desc)
 
-    def context(
+    def context(self, cls: Type[C]) -> Type[C]:
+        key = cls.__name__
+        if key in self._context_types:
+            existing_cls = self._context_types[key]
+            if existing_cls != cls:
+                raise ValueError(
+                    f"Context name '{key}' is already registered to {existing_cls.__name__}. "
+                    f"Cannot register it again for {cls.__name__}"
+                )
+
+        # Register the context type
+        self._context_types[key] = cls
+        return cls
+
+    @contextmanager
+    def provide(
         self,
-        example: Example,
-        state: Any,
-        hooks: Sequence[Hook] | None = None,
-        cache: Sequence[Callable] | None = None,
-    ) -> None:
-        pass
+        *contexts: Any,
+        hooks: list[Hook] = [],
+    ) -> Generator[None, None, None]:
+        with self._provide_run() as run:
+            with self._provide_contexts(run, *contexts):
+                with self._provide_hooks(run, hooks):
+                    yield
 
-    def eval(self, example: T) -> None:
-        pass
+    @contextmanager
+    def _provide_run(self, task_name: str | None = None) -> Generator[Run, None, None]:
+        """Manages the run context, creating a new one if needed."""
+        run = _run_context.get()
+        created_run = False
 
-    def eval_context(self):
-        pass
+        if run is None:
+            if task_name is None:
+                task_name = "default"
+            run = Run(self._runs_dir, task_name)
+            _run_context.set(run)
+            created_run = True
+
+        try:
+            yield run
+        finally:
+            if created_run:
+                _run_context.set(None)
+
+    @contextmanager
+    def _provide_contexts(self, run: Run, *contexts: Any) -> Generator[None, None, None]:
+        context_keys = [type(context).__name__ for context in contexts]
+
+        # ensure that all contexts have been registered
+        for key in context_keys:
+            if key not in self._context_types:
+                raise ValueError(
+                    f"Type {key} has not been registered as a context. "
+                    "Use the `@ls.context` decorator to register it."
+                )
+
+        # save previous values
+        prev_values = {key: run.context_values.get(key) for key in context_keys}
+
+        # set new values
+        for context, key in zip(contexts, context_keys):
+            run.context_values[key] = context
+
+        try:
+            yield
+        finally:
+            # restore previous values
+            for key, prev_value in prev_values.items():
+                if prev_value is not None:
+                    run.context_values[key] = prev_value
+                else:
+                    del run.context_values[key]
+
+    @contextmanager
+    def _provide_hooks(self, run: Run, hooks: list[Hook]) -> Generator[None, None, None]:
+        """Provide hooks for the current run"""
+        # Group hooks by their target function name
+        hook_map: dict[str, list[Hook]] = {}
+        for hook in hooks:
+            target_name = hook.target.__name__
+            if target_name not in hook_map:
+                hook_map[target_name] = []
+            hook_map[target_name].append(hook)
+
+        # Store previous hooks
+        prev_hooks = run.hooks.copy()
+
+        # Update run's hooks
+        for target_name, target_hooks in hook_map.items():
+            if target_name not in run.hooks:
+                run.hooks[target_name] = []
+            run.hooks[target_name].extend(target_hooks)
+
+        try:
+            yield
+        finally:
+            # Restore previous hooks
+            run.hooks = prev_hooks
+
+    def __getitem__(self, context_type: Type[T]) -> T:
+        """Get a context value by its type"""
+        key = context_type.__name__
+        run = self._get_current_run()
+        try:
+            return cast(T, run.context_values[key])
+        except KeyError:
+            raise ValueError(
+                f"No context value provided for type {context_type.__name__}. "
+                "Use 'with ls.provide(value):' to provide one."
+            )
+
+    def eval(self):  # type: ignore[no-untyped-def]
+        """Just an alias for task for the extension to consume"""
+        return self.task
+
+    @contextmanager
+    def mock(self):
+        """Request that tasks in this context use their mock implementations"""
+        with self._provide_run() as run:
+            prev_mock = run.do_mock
+            run.do_mock = True
+            try:
+                yield
+            finally:
+                run.do_mock = prev_mock
+
+    @contextmanager
+    def no_mock(self):
+        """Request that tasks in this context use their real implementations"""
+        with self._provide_run() as run:
+            prev_mock = run.do_mock
+            run.do_mock = False
+            try:
+                yield
+            finally:
+                run.do_mock = prev_mock
+
+    @contextmanager
+    def cache(self):
+        """Request that tasks in this context use cached results if available"""
+        token = _do_cache.set(True)
+        try:
+            yield
+        finally:
+            _do_cache.reset(token)
+
+    @contextmanager
+    def no_cache(self):
+        """Request that tasks in this context ignore cached results"""
+        token = _do_cache.set(False)
+        try:
+            yield
+        finally:
+            _do_cache.reset(token)

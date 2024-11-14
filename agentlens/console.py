@@ -3,7 +3,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 from logging import getLogger
-from pathlib import Path
 from typing import Any, Callable, ClassVar
 
 from textual.app import App, ComposeResult
@@ -44,18 +43,18 @@ class RunTree(Tree):
         status = trace.get_status()
         if status == "failed":
             color = "red3"
-        elif status in ("loading", "running"):
+        elif status == "running":
             color = "dodger_blue1"
         else:
             color = "green3"
 
-        node = parent_node.add(f"[b {color}]{trace.name}[/]", expand=True)
+        node = parent_node.add(f"[b {color}]{trace.get_status_icon()} {trace.name}[/]", expand=True)
 
         for log in trace.logs:
             node.add_leaf(f"{log.message}")
 
         for file in trace.files:
-            file_path = run.dir / file.name if run else Path(file.name)
+            file_path = run.dir / file.name
             abs_path = str(file_path.resolve())
             leaf_node = node.add_leaf(f"📄 {file.name}")
             leaf_node.data = {"type": "file", "path": abs_path}
@@ -68,9 +67,8 @@ class RunTree(Tree):
         self.root.remove_children()
 
         for i, run in enumerate(self.runs):
-            run_node = self.root.add(f"Row {i}", expand=True)
-            observation = run.observation.children[0]
-            self.render_trace(observation, run_node, run)
+            run_node = self.root.add(f"Run {i}", expand=True)
+            self.render_trace(run.observation, run_node, run)
 
         self._apply_node_states(self.root, node_states)
         self.refresh()
