@@ -1,10 +1,9 @@
 import pytest
 
-from agentlens.lens import Lens
-from tests.conftest import (
+from agentlens.client import Lens, provide, task
+from tests.test_tasks import (
     Counter,
     Messages,
-    UnregisteredContext,
     add_message,
     get_counter_value,
     increment_counter,
@@ -13,26 +12,25 @@ from tests.conftest import (
 
 
 @pytest.mark.asyncio
-async def test_single_context(ls: Lens):
+@task
+async def test_single_context(lens: Lens):
     """Test providing a single context"""
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    print(ls._context_types)
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     counter = Counter(0)
 
-    with ls.provide(counter):
+    with provide(counter):
         result = await increment_counter()
         assert result == 1
         assert counter.value == 1
 
 
 @pytest.mark.asyncio
-async def test_multiple_contexts(ls: Lens):
+@task
+async def test_multiple_contexts(lens: Lens):
     """Test providing multiple contexts simultaneously"""
     counter = Counter(0)
     messages = Messages()
 
-    with ls.provide(counter, messages):
+    with provide(counter, messages):
         await increment_counter()
         await add_message("test")
 
@@ -41,27 +39,27 @@ async def test_multiple_contexts(ls: Lens):
 
 
 @pytest.mark.asyncio
-async def test_nested_contexts(ls: Lens):
-    """Test nested context providers"""
+@task
+async def test_double_provision_fails(lens: Lens):
     counter1 = Counter(0)
     counter2 = Counter(10)
 
-    with ls.provide(counter1):
+    with provide(counter1):
         assert await get_counter_value() == 0
 
-        with ls.provide(counter2):
-            assert await get_counter_value() == 10
-
-        assert await get_counter_value() == 0
+        with pytest.raises(ValueError, match="Context Counter already provided"):
+            with provide(counter2):
+                pass
 
 
 @pytest.mark.asyncio
-async def test_context_with_hooks(ls: Lens):
+@task
+async def test_context_with_hooks(lens: Lens):
     """Test contexts working with hooks"""
     counter = Counter(0)
     messages = Messages()
 
-    with ls.provide(counter, messages, hooks=[log_increment]):
+    with provide(counter, messages, hooks=[log_increment]):
         await increment_counter()
 
         assert counter.value == 1
@@ -69,16 +67,8 @@ async def test_context_with_hooks(ls: Lens):
 
 
 @pytest.mark.asyncio
-async def test_missing_context(ls: Lens):
+@task
+async def test_missing_context(lens: Lens):
     """Test error when required context is missing"""
     with pytest.raises(ValueError, match="No context value provided for type Counter"):
         await get_counter_value()
-
-
-@pytest.mark.asyncio
-async def test_unregistered_context(ls: Lens):
-    """Test error when using unregistered context type"""
-    context = UnregisteredContext(0)
-    with pytest.raises(ValueError, match="has not been registered as a context"):
-        with ls.provide(context):
-            pass

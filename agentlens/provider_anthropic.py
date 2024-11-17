@@ -3,6 +3,7 @@ from typing import Any, Type, TypeVar
 import anthropic
 from pydantic import BaseModel
 
+from agentlens import lens
 from agentlens.provider import InferenceCost, Message, Provider
 
 T = TypeVar("T", bound=BaseModel)
@@ -40,14 +41,12 @@ class Anthropic(Provider):
         response: Any,
         inference_cost: InferenceCost | None,
     ) -> None:
-        if inference_cost is None:
-            return
-
+        cost = lens.run.cost
         usage = getattr(response, "usage", None)
         if usage:
             input_cost_per_token, output_cost_per_token = self.get_token_costs(model)
-            inference_cost.input_cost += usage.input_tokens * input_cost_per_token / 1_000_000
-            inference_cost.output_cost += usage.output_tokens * output_cost_per_token / 1_000_000
+            cost.input += usage.input_tokens * input_cost_per_token / 1_000_000
+            cost.output += usage.output_tokens * output_cost_per_token / 1_000_000
 
     async def generate_text(
         self,

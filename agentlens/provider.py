@@ -49,8 +49,9 @@ class Provider(ABC):
         self.name = name
         self._semaphores: dict[str, asyncio.Semaphore] = {}
 
-        for model, limit in max_connections.items():
-            self._semaphores[model] = asyncio.Semaphore(limit)
+        if max_connections is not None:
+            for model, limit in max_connections.items():
+                self._semaphores[model] = asyncio.Semaphore(limit)
 
         self._default_semaphore = asyncio.Semaphore(max_connections_default)
 

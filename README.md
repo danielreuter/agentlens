@@ -119,6 +119,20 @@ async def eval_some_task():
 
 ### Mocks
 
+Often you will want to run a particular slice of the graph in isolation
+to do this, you can attach mock functions to your tasks, which should adopt the
+same interface as the task itself -- potentially reading from your database or local
+filesystem to provide the necessary data, instead of calling expensive third-party APIs
+like inference providers.
+
+This API makes no assumptions about how your backend works
+
+
+The arguments and return types must match that of the target function (the
+arguments can be a subset of the target function's arguments)
+This will be checked at runtime, similar to how hooks are validated.
+This behavior can be turned off in the Lens config with `strict=False`.
+
 Mocks are functions that can be used to replace the behavior of other functions for the purpose of testing. They are defined using the `@mock` decorator, and they can be used to replace the behavior of other functions by passing in a `replace` argument to the `provide` context manager.
 
 ```python

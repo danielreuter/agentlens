@@ -17,8 +17,8 @@ from pydantic import (
     Field,
 )
 
+from agentlens.client import Lens
 from agentlens.exceptions import DatasetIndexError
-from agentlens.lens import Lens
 
 MISSING_LABEL = object()
 SUBSET_FILTER_FN_INDICATOR = "_is_subset_filter_function"

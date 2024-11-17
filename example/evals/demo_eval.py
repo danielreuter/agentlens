@@ -1,36 +1,28 @@
 import json
 from dataclasses import dataclass
 
-import agentlens as ag
-from agentlens.hooks import GeneratorHook
+import agentlens.evaluation as ev
+from agentlens import lens, provide, task
 from example.agent import check_integrity, extract_total_cost, process_invoice
-from example.config import ls
+from example.config import openai
 from example.datasets import InvoiceDataset, InvoiceExample
 
-
 # Inference provider
-class OpenAI:
-    def __truediv__(self, model: str) -> str:
-        return model
-
-    def __getitem__(self, model: str) -> str:
-        return model
-
-
-openai = OpenAI()
 
 
 # simple sync eval
-# - demonstrates `ls.iter`
+# - demonstrates `lens.iter`
+@task
 def run_process_invoice_simple_sync():
     dataset = InvoiceDataset("september")
 
-    for invoice in ls.iter(dataset, desc="Processing invoices"):
+    for invoice in lens.iter(dataset, desc="Processing invoices"):
         process_invoice(invoice)
 
 
 # simple async eval
-# - demonstrates `ls.gather`
+# - demonstrates `lens.gather`
+@task
 async def run_process_invoice_simple_async():
     dataset = InvoiceDataset("september")
 
@@ -38,75 +30,51 @@ async def run_process_invoice_simple_async():
         return await process_invoice(invoice)
 
     tasks = [run(invoice) for invoice in dataset]
-    await ls.gather(*tasks, desc="Processing invoices")
+    await lens.gather(*tasks, desc="Processing invoices")
 
 
 # simple context
-# - demonstrates `ls.provide`
-# - demonstrates `ls.__getitem__`
+# - demonstrates `lens.provide`
+# - demonstrates `lens.__getitem__`
 # Takeaways:
 # - you can use AgentLens to create type-safe contextvars
 # - namespacing is provided by the class
 @dataclass
-@ls.context
 class Scores:
     total_cost_diffs: list[float]
     correct_integrities: list[bool]
 
 
-@ls.task()
+@task
 async def some_task_creating_context() -> int:
     scores = Scores(total_cost_diffs=[], correct_integrities=[])
-    with ls.provide(scores):
+    with provide(scores):
         test = await some_task_using_context(1.0)
         return test
 
 
-@ls.task()
+@task
 async def some_task_using_context(num: float) -> int:
-    scores = ls[Scores]
+    scores = lens[Scores]
     scores.total_cost_diffs.append(num)
     return 3
 
 
 # simple hooks -- bootstrapping
-# - demonstrates `ls.hook`
-# - demonstrates `ls.hooks`
-@ag.hook(check_integrity)
-def boot_check_integrity() -> GeneratorHook[bool]:
-    example = ls[InvoiceExample]
+# - demonstrates `lens.hook`
+# - demonstrates `lens.hooks`
+@ev.hook(check_integrity)
+def boot_check_integrity() -> ev.HookGenerator[bool]:
+    example = lens[InvoiceExample]
     result = yield {"model": openai / "o1-preview"}
     example.contains_error = result
 
 
-def use(): ...
-
-
-class Lens:
-    def __getitem__(self, key: type): ...
-
-    def provide(self, *args, **kwargs): ...
-
-    def gather(self, *args, **kwargs): ...
-
-
-lens = Lens()
-
-
-@ag.hook(extract_total_cost)
-def boot_extract_total_cost() -> GeneratorHook[float]:
+@ev.hook(extract_total_cost)
+def boot_extract_total_cost() -> ev.HookGenerator[float]:
     example = lens[InvoiceExample]
     result = yield {"model": openai / "o1-preview"}
     example.total_cost = result
-
-
-def task(): ...
-
-
-def provide(): ...
-
-
-def gather(): ...
 
 
 @task
@@ -123,34 +91,34 @@ async def bootstrap_invoice_labels():
             return await process_invoice(example.markdown)
 
     tasks = [eval(example) for example in dataset]
-    await gather(*tasks, desc="Processing invoices")
+    await lens.gather(*tasks, desc="Processing invoices")
 
     dataset.save()
 
 
 ## note-- above shows how each eval can exert fine-grained control over the computation graph
-## without polluting the callstack
+## without polluting the callenstack
 
 
 ## now let's see how we can use these hooks to collect metrics in an eval
 
 
-@ls.hook(check_integrity)
-def hook_check_integrity() -> GeneratorHook[str]:
-    example, scores = ls[InvoiceExample], ls[Scores]
+@ev.hook(check_integrity)
+def hook_check_integrity() -> ev.HookGenerator[str]:
+    example, scores = lens[InvoiceExample], lens[Scores]
     output = yield {}
     score = output == example.contains_error
     scores.correct_integrities.append(score)
 
 
-@ls.hook(extract_total_cost)
-def hook_extract_total_cost() -> GeneratorHook[float]:
-    example, scores = ls[InvoiceExample], ls[Scores]
+@ev.hook(extract_total_cost)
+def hook_extract_total_cost() -> ev.HookGenerator[float]:
+    example, scores = lens[InvoiceExample], lens[Scores]
     result = yield {}
     scores.total_cost_diffs.append(result == example.total_cost)
 
 
-@ls.eval()
+@task
 async def eval_process_invoice():
     dataset = InvoiceDataset("september")
     scores = Scores(total_cost_diffs=[], correct_integrities=[])
@@ -160,13 +128,13 @@ async def eval_process_invoice():
     ]
 
     async def eval(example):
-        with ls.provide(scores, example, hooks=hooks):
+        with provide(scores, example, hooks=hooks):
             return await process_invoice(example.markdown)
 
     tasks = [eval(example) for example in dataset]
-    results = ls.gather(*tasks, desc="Processing invoices")
+    results = await lens.gather(*tasks, desc="Processing invoices")
 
-    (ls / "report.json").write_text(
+    (lens / "report.json").write_text(
         json.dumps(
             {
                 "results": results,
@@ -181,27 +149,3 @@ async def eval_process_invoice():
 
 def mean(values: list[float]) -> float:
     return sum(values) / len(values) if len(values) > 0 else 0.0
-
-
-# often you will want to run a particular slice of the graph in isolation
-# to do this, you can attach mock functions to your tasks, which should adopt the
-# same interface as the task itself -- potentially reading from your database or local
-# filesystem to provide the necessary data, instead of calling expensive third-party APIs
-# like inference providers.
-
-# this API makes no assumptions about how your backend works
-
-
-async def mock_some_task(arg: bool) -> bool:
-    return False
-
-
-@ls.task(mock=mock_some_task)
-async def some_task(arg: bool) -> bool:
-    return not arg
-
-
-# the arguments and return types must match that of the target function (the
-# arguments can be a subset of the target function's arguments)
-# this will be checked at runtime, similar to how hooks are validated.
-# This behavior can be turned off in the Lens config with strict=False

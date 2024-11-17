@@ -3,7 +3,7 @@ from typing import Any, Type, TypeVar
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from agentlens.lens import lens
+from agentlens.client import lens
 from agentlens.model import ModelUsage
 from agentlens.provider import Message, Provider
 

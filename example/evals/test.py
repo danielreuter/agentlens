@@ -1,10 +1,29 @@
-from example.config import ai, ls
+from agentlens import lens, task
+from agentlens.inference import generate_text
+from example.config import openai
 
 
-@ls.task()
+@task
 async def shit():
-    result = await ai.generate_text(
-        model="openai:o1-preview",
+    await generate_text(
+        model=openai / "o1-preview",
         prompt="What is the capital of France?",
     )
-    print(result, ls._get_current_run().inference_cost)
+
+
+@task
+async def shit2():
+    tasks = [shit3(i) for i in range(3)]
+    await lens.gather(*tasks, desc="doing shit")
+
+
+@task
+async def shit3(idx: int):
+    assert idx == lens.task.iteration
+    tasks = [shit4(i) for i in range(3)]
+    await lens.gather(*tasks, desc="doing shit 3")
+
+
+@task
+async def shit4(idx: int):
+    assert idx == lens.task.iteration

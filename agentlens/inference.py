@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import random
-from typing import Any, Type, TypeVar
+from typing import Any, Awaitable, Callable, Type, TypeVar
 
 from pydantic import BaseModel
 from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
@@ -24,7 +24,9 @@ async def generate_text(
     **kwargs,
 ) -> str:
     return await _generate(
-        model,
+        model.provider.generate_text,
+        semaphore=model.provider.get_semaphore(model.name),
+        model_name=model.name,
         messages=messages,
         system=system,
         prompt=prompt,
@@ -48,7 +50,9 @@ async def generate_object(
     if hasattr(schema, "__name__"):
         schema.__name__ = "Response"
     return await _generate(
-        model,
+        model.provider.generate_object,
+        semaphore=model.provider.get_semaphore(model.name),
+        model_name=model.name,
         schema=schema,
         messages=messages,
         system=system,
@@ -60,7 +64,9 @@ async def generate_object(
 
 
 async def _generate(
-    model: Model,
+    generate: Callable[..., Awaitable[Any]],
+    semaphore: asyncio.Semaphore,
+    model_name: str,
     messages: list[Message] | None,
     system: str | None,
     prompt: str | None,
@@ -82,10 +88,10 @@ async def _generate(
         ):
             with attempt:
                 try:
-                    async with model.provider.get_semaphore(model.name):
+                    async with semaphore:
                         await asyncio.sleep(random.uniform(0, 0.1))
-                        return await model.provider.generate_object(
-                            model=model,
+                        return await generate(
+                            model=model_name,
                             messages=collected_messages,
                             **kwargs,
                         )
