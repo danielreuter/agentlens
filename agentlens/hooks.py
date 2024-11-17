@@ -1,5 +1,5 @@
 from inspect import signature
-from typing import Any, Callable, Generator, TypeVar, get_type_hints
+from typing import Any, Callable, Generator, Sequence, TypeVar, get_type_hints
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -102,3 +102,18 @@ def convert_to_kwargs(fn: Callable, args: tuple, kwargs: dict) -> dict[str, Any]
     bound_args = signature(fn).bind(*args, **kwargs)
     bound_args.apply_defaults()
     return dict(bound_args.arguments)
+
+
+# todo is this used
+def initialize_hooks(
+    example: T,
+    hook_factories: Sequence[Callable[[T], Hook]] | None,
+) -> dict[str, list[Hook]]:
+    hooks: dict[str, list[Hook]] = {}
+    for hook_factory in hook_factories or []:
+        hook = hook_factory(example)
+        target_name = hook.target.__name__
+        if target_name not in hooks:
+            hooks[target_name] = []
+        hooks[target_name].append(hook)
+    return hooks

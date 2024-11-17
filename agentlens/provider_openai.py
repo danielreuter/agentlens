@@ -3,8 +3,9 @@ from typing import Any, Type, TypeVar
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
+from agentlens.lens import lens
 from agentlens.model import ModelUsage
-from agentlens.provider import InferenceCost, Message, Provider
+from agentlens.provider import Message, Provider
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -28,15 +29,14 @@ class OpenAIProvider(Provider):
         return self.MODEL_COSTS.get(model, (0.0, 0.0))
 
     def _extract_usage(self, response: Any) -> ModelUsage:
-        """Extract token usage from OpenAI response"""
         usage = getattr(response, "usage", None)
-        if usage:
-            return ModelUsage(
-                input_tokens=usage.prompt_tokens,
-                output_tokens=usage.completion_tokens,
-                total_tokens=usage.total_tokens,
-            )
-        return ModelUsage()
+        if usage is None:
+            raise ValueError("No usage data found in OpenAI response")
+        return ModelUsage(
+            input_tokens=usage.prompt_tokens,
+            output_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+        )
 
     def __init__(
         self,
@@ -50,26 +50,19 @@ class OpenAIProvider(Provider):
         self,
         model: str,
         response: Any,
-        inference_cost: InferenceCost | None,
     ) -> None:
-        if inference_cost is None:
-            return
-
-        usage = getattr(response, "usage", None)
-        print(usage)
+        cost = lens.run.cost
+        usage = self._extract_usage(response)
         if usage:
             input_cost_per_token, output_cost_per_token = self.get_token_costs(model)
-            inference_cost.input_cost += usage.prompt_tokens * input_cost_per_token / 1_000_000
-            inference_cost.output_cost += (
-                usage.completion_tokens * output_cost_per_token / 1_000_000
-            )
+            cost.input += usage.input_tokens * input_cost_per_token / 1_000_000
+            cost.output += usage.output_tokens * output_cost_per_token / 1_000_000
 
     async def generate_text(
         self,
         *,
         model: str,
         messages: list[Message],
-        inference_cost: InferenceCost | None = None,
         **kwargs,
     ) -> str:
         completion = await self.client.chat.completions.create(
@@ -78,7 +71,7 @@ class OpenAIProvider(Provider):
             **kwargs,
         )
 
-        self._update_cost(model, completion, inference_cost)
+        self._update_cost(model, completion)
         assert completion.choices[0].message.content is not None
         return completion.choices[0].message.content
 
@@ -88,7 +81,6 @@ class OpenAIProvider(Provider):
         model: str,
         messages: list[Message],
         schema: Type[T],
-        inference_cost: InferenceCost | None = None,
         **kwargs,
     ) -> T:
         completion = await self.client.beta.chat.completions.parse(
@@ -98,6 +90,6 @@ class OpenAIProvider(Provider):
             **kwargs,
         )
 
-        self._update_cost(model, completion, inference_cost)
+        self._update_cost(model, completion)
         assert completion.choices[0].message.parsed is not None
         return completion.choices[0].message.parsed

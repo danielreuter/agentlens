@@ -13,20 +13,20 @@ T = TypeVar("T")
 
 @dataclass
 class InferenceCost:
-    input_cost: float = 0.0
-    output_cost: float = 0.0
+    input: float = 0.0
+    output: float = 0.0
 
     @property
-    def total_cost(self) -> float:
-        return self.input_cost + self.output_cost
+    def total(self) -> int:
+        return self.input + self.output
 
     def __str__(self) -> str:
         return dedent(
             f"""\
             Inference cost:
-            - Input cost: ${self.input_cost:.6f}
-            - Output cost: ${self.output_cost:.6f}
-            - Total cost: ${self.total_cost:.6f}
+            - Input cost: ${self.input:.6f}
+            - Output cost: ${self.output:.6f}
+            - Total cost: ${self.total:.6f}
             """
         )
 
@@ -54,7 +54,6 @@ class Provider(ABC):
         *,
         model: str,
         messages: list[Message],
-        inference_cost: InferenceCost | None = None,
         **kwargs,
     ) -> str:
         pass
@@ -66,7 +65,6 @@ class Provider(ABC):
         model: str,
         messages: list[Message],
         schema: Type[T],
-        inference_cost: InferenceCost | None = None,
         **kwargs,
     ) -> T:
         pass
