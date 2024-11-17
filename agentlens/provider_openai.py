@@ -10,7 +10,7 @@ from agentlens.provider import Message, Provider
 T = TypeVar("T", bound=BaseModel)
 
 
-class OpenAIProvider(Provider):
+class OpenAI(Provider):
     # Cost per million tokens in USD
     MODEL_COSTS = {
         "gpt-4o-mini": (0.150, 0.600),
@@ -23,6 +23,19 @@ class OpenAIProvider(Provider):
         "o1-preview": (15.00, 60.00),
         "o1-preview-2024-09-12": (15.00, 60.00),
     }
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_connections: dict[str, int] | None = None,
+        max_connections_default: int = 10,
+    ):
+        super().__init__(
+            name="anthropic",
+            max_connections=max_connections,
+            max_connections_default=max_connections_default,
+        )
+        self.client = AsyncOpenAI(api_key=api_key)
 
     def get_token_costs(self, model: str) -> tuple[float, float]:
         """Returns (input_cost_per_million, output_cost_per_million)"""
@@ -37,14 +50,6 @@ class OpenAIProvider(Provider):
             output_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
         )
-
-    def __init__(
-        self,
-        api_key: str | None = None,
-        max_connections: dict[str, int] = {"DEFAULT": 10},
-    ):
-        super().__init__(name="openai", max_connections=max_connections)
-        self.client = AsyncOpenAI(api_key=api_key)
 
     def _update_cost(
         self,
@@ -67,7 +72,7 @@ class OpenAIProvider(Provider):
     ) -> str:
         completion = await self.client.chat.completions.create(
             model=model,
-            messages=[m.model_dump() for m in messages],
+            messages=[m.model_dump() for m in messages],  # type: ignore
             **kwargs,
         )
 
@@ -85,7 +90,7 @@ class OpenAIProvider(Provider):
     ) -> T:
         completion = await self.client.beta.chat.completions.parse(
             model=model,
-            messages=[message.model_dump() for message in messages],
+            messages=[message.model_dump() for message in messages],  # type: ignore
             response_format=schema,
             **kwargs,
         )

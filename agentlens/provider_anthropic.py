@@ -8,7 +8,7 @@ from agentlens.provider import InferenceCost, Message, Provider
 T = TypeVar("T", bound=BaseModel)
 
 
-class AnthropicProvider(Provider):
+class Anthropic(Provider):
     # Cost per million tokens in USD
     MODEL_COSTS = {
         "claude-3-5-sonnet-20240620": (3.00, 15.00),
@@ -20,9 +20,14 @@ class AnthropicProvider(Provider):
     def __init__(
         self,
         api_key: str | None = None,
-        max_connections: dict[str, int] = {"DEFAULT": 10},
+        max_connections: dict[str, int] | None = None,
+        max_connections_default: int = 10,
     ):
-        super().__init__(name="anthropic", max_connections=max_connections)
+        super().__init__(
+            name="anthropic",
+            max_connections=max_connections,
+            max_connections_default=max_connections_default,
+        )
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
 
     def get_token_costs(self, model: str) -> tuple[float, float]:
@@ -54,7 +59,7 @@ class AnthropicProvider(Provider):
     ) -> str:
         completion = await self.client.messages.create(
             model=model,
-            messages=[m.model_dump() for m in messages],
+            messages=[m.model_dump() for m in messages],  # type: ignore
             **kwargs,
         )
 
@@ -68,7 +73,6 @@ class AnthropicProvider(Provider):
         model: str,
         messages: list[Message],
         schema: Type[T],
-        inference_cost: InferenceCost | None = None,
         **kwargs,
     ) -> T:
         raise NotImplementedError("Anthropic does not support object generation")

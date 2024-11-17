@@ -82,3 +82,19 @@ class Message(BaseModel):
                     for item in self.content
                 ],
             )
+
+
+def user_message(raw_content: RawMessageContent) -> Message:
+    return Message.user(raw_content)
+
+
+def system_message(raw_content: RawMessageContent) -> Message:
+    return Message.system(raw_content)
+
+
+def assistant_message(raw_content: RawMessageContent) -> Message:
+    return Message.assistant(raw_content)
+
+
+def image_message(url: str) -> ImageContent:
+    return Message.image(url)
