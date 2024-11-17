@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
 
 from agentlens.dataset import Dataset
+from agentlens.lens import Lens
 from agentlens.provider import Message, Provider
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,15 @@ class AI:
             prompt=prompt,
             dedent=dedent,
         )
+
+        # Get the current run's inference cost if available
+        inference_cost = None
+        try:
+            run = Lens._get_current_run()
+            inference_cost = run.inference_cost
+        except ValueError:
+            pass
+
         try:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(max_retries),
@@ -109,6 +119,7 @@ class AI:
                             return await generator(
                                 model=model,
                                 messages=collected_messages,
+                                inference_cost=inference_cost,
                                 **kwargs,
                             )
                     except Exception as e:
@@ -148,7 +159,7 @@ class AI:
         self,
         *,
         model: str,
-        type: Type[T],
+        schema: Type[T],
         messages: list[Message] | None = None,
         system: str | None = None,
         prompt: str | None = None,
@@ -157,14 +168,14 @@ class AI:
         **kwargs,
     ) -> T:
         # inline types may have invalid __name__ attributes -- replace w/ a default
-        if hasattr(type, "__name__"):
-            type.__name__ = "Response"
+        if hasattr(schema, "__name__"):
+            schema.__name__ = "Response"
         provider, model_name = self._get_provider(model)
         return await self._generate(
             provider.generate_object,
             model=model_name,
             semaphore=provider.get_semaphore(model_name),
-            type=type,
+            schema=schema,
             messages=messages,
             system=system,
             prompt=prompt,

@@ -1,30 +1,15 @@
 import asyncio
 import sys
+import traceback
 from importlib import import_module
 from pathlib import Path
-from typing import Any, Callable
 
 import typer
 from typing_extensions import Annotated
 
-from agentlens.console import RunConsole
-from agentlens.trace import Run
-
 app = typer.Typer()
 run_app = typer.Typer()
 app.add_typer(run_app, name="run")
-
-
-def wrap_function(func: Callable[[], Any], runs: list[Run]) -> Callable[[], Any]:
-    """Wrap the target function to capture its run context"""
-
-    async def wrapped():
-        if asyncio.iscoroutinefunction(func):
-            await func()
-        else:
-            func()
-
-    return wrapped
 
 
 @run_app.callback(invoke_without_command=True)
@@ -58,19 +43,16 @@ def run(
         # Parse args into sys.argv for the function's CLI parser
         sys.argv = [file_path]
 
-        # Create a list to store runs
-        runs: list[Run] = []
+        if asyncio.iscoroutinefunction(func):
+            asyncio.run(func())
+        else:
+            func()
 
-        # Create and run the console app
-        wrapped_func = wrap_function(func, runs)
-        app = RunConsole(runs=runs, execute_callback=wrapped_func)
-        app.run()
-
-    except ImportError as e:
-        typer.echo(f"Failed to import module: {e}", err=True)
+    except ImportError:
+        traceback.print_exc()
         raise typer.Exit(1)
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
+    except Exception:
+        traceback.print_exc()
         raise typer.Exit(1)
 
 

@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 
+import agentlens as ag
 from agentlens.hooks import GeneratorHook
 from example.agent import check_integrity, extract_total_cost, process_invoice
 from example.config import ls
@@ -21,7 +22,6 @@ openai = OpenAI()
 
 # simple sync eval
 # - demonstrates `ls.iter`
-@ls.eval()
 def run_process_invoice_simple_sync():
     dataset = InvoiceDataset("september")
 
@@ -31,7 +31,6 @@ def run_process_invoice_simple_sync():
 
 # simple async eval
 # - demonstrates `ls.gather`
-@ls.eval()
 async def run_process_invoice_simple_async():
     dataset = InvoiceDataset("september")
 
@@ -39,7 +38,7 @@ async def run_process_invoice_simple_async():
         return await process_invoice(invoice)
 
     tasks = [run(invoice) for invoice in dataset]
-    ls.gather(*tasks, desc="Processing invoices")
+    await ls.gather(*tasks, desc="Processing invoices")
 
 
 # simple context
@@ -49,6 +48,7 @@ async def run_process_invoice_simple_async():
 # - you can use AgentLens to create type-safe contextvars
 # - namespacing is provided by the class
 @dataclass
+@ls.context
 class Scores:
     total_cost_diffs: list[float]
     correct_integrities: list[bool]
@@ -72,34 +72,58 @@ async def some_task_using_context(num: float) -> int:
 # simple hooks -- bootstrapping
 # - demonstrates `ls.hook`
 # - demonstrates `ls.hooks`
-@ls.hook(check_integrity)
+@ag.hook(check_integrity)
 def boot_check_integrity() -> GeneratorHook[bool]:
     example = ls[InvoiceExample]
     result = yield {"model": openai / "o1-preview"}
     example.contains_error = result
 
 
-@ls.hook(extract_total_cost)
+def use(): ...
+
+
+class Lens:
+    def __getitem__(self, key: type): ...
+
+    def provide(self, *args, **kwargs): ...
+
+    def gather(self, *args, **kwargs): ...
+
+
+lens = Lens()
+
+
+@ag.hook(extract_total_cost)
 def boot_extract_total_cost() -> GeneratorHook[float]:
-    example = ls[InvoiceExample]
+    example = lens[InvoiceExample]
     result = yield {"model": openai / "o1-preview"}
     example.total_cost = result
 
 
-@ls.eval()
+def task(): ...
+
+
+def provide(): ...
+
+
+def gather(): ...
+
+
+@task
 async def bootstrap_invoice_labels():
     dataset = InvoiceDataset("september")
     hooks = [
         boot_check_integrity,
         boot_extract_total_cost,
     ]
+    mocks = []
 
     async def eval(example):
-        with ls.provide(example, hooks=hooks):
+        with provide(example, hooks=hooks, mocks=mocks):
             return await process_invoice(example.markdown)
 
     tasks = [eval(example) for example in dataset]
-    ls.gather(*tasks, desc="Processing invoices")
+    await gather(*tasks, desc="Processing invoices")
 
     dataset.save()
 

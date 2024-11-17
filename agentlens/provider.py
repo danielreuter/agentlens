@@ -1,13 +1,34 @@
+from __future__ import annotations
+
 import asyncio
-import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from textwrap import dedent
 from typing import Type, TypeVar
 
 from agentlens.message import Message
 
-logger = logging.getLogger(__name__)
-
 T = TypeVar("T")
+
+
+@dataclass
+class InferenceCost:
+    input_cost: float = 0.0
+    output_cost: float = 0.0
+
+    @property
+    def total_cost(self) -> float:
+        return self.input_cost + self.output_cost
+
+    def __str__(self) -> str:
+        return dedent(
+            f"""\
+            Inference cost:
+            - Input cost: ${self.input_cost:.6f}
+            - Output cost: ${self.output_cost:.6f}
+            - Total cost: ${self.total_cost:.6f}
+            """
+        )
 
 
 class Provider(ABC):
@@ -33,8 +54,7 @@ class Provider(ABC):
         *,
         model: str,
         messages: list[Message],
-        dedent: bool,
-        max_retries: int,
+        inference_cost: InferenceCost | None = None,
         **kwargs,
     ) -> str:
         pass
@@ -45,7 +65,8 @@ class Provider(ABC):
         *,
         model: str,
         messages: list[Message],
-        type: Type[T],
+        schema: Type[T],
+        inference_cost: InferenceCost | None = None,
         **kwargs,
     ) -> T:
         pass

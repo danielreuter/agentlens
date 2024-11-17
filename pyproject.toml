@@ -1,13 +1,12 @@
 [tool.poetry]
 name = "agentlens"
-version = "0.1.7"
+version = "0.1.13"
 description = "lightweight abstractions for building agent scaffolds"
 authors = ["danielreuter <dreuter14@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
-langfuse = "^2.52.1"
 mypy = "^1.12.1"
 openai = "1.47.0"
 anthropic = "^0.37.1"

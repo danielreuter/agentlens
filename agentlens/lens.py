@@ -54,13 +54,12 @@ class Lens:
         self._mock_registry = {}
 
     @overload
-    def task(
-        self, fn: Callable[P, Coroutine[Any, Any, R]]
-    ) -> Callable[P, Coroutine[Any, Any, R]]: ...
+    def task(self, fn: F) -> F: ...
 
     @overload
     def task(
         self,
+        fn: None = None,
         *,
         name: str | None = None,
         mock: Callable | None = None,
@@ -72,10 +71,7 @@ class Lens:
         *,
         name: str | None = None,
         mock: Callable | None = None,
-    ) -> (
-        Callable[P, Coroutine[Any, Any, R]]
-        | Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]
-    ):
+    ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]:
         def decorator(
             fn: Callable[P, Coroutine[Any, Any, R]],
         ) -> Callable[P, Coroutine[Any, Any, R]]:
@@ -89,6 +85,9 @@ class Lens:
             async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 with self._provide_run(fn.__name__) as run:
                     with run.create_observation(fn.__name__):
+                        indent = "    " * (len(run.observation_stack) - 1)
+                        self._log.info(f"{indent}[{fn.__name__}]")
+
                         hooks = run.hooks.get(fn.__name__, [])
 
                         # run pre-hooks
@@ -142,10 +141,12 @@ class Lens:
         run = self._get_current_run()
         return run.dir
 
-    def _get_current_run(self) -> Run:
+    @staticmethod
+    def _get_current_run() -> Run:
+        """Get the current run from context"""
         run = _run_context.get()
         if run is None:
-            raise ValueError("Attempted to access current Run outside of a run context")
+            raise ValueError("No active run context")
         return run
 
     def __truediv__(self, other: str | Path) -> Path:

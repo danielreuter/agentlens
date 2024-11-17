@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 
 class TextContent(BaseModel):
-    type: Literal["text"]
+    type: Literal["text"] = "text"
     text: str
 
 
@@ -16,7 +16,7 @@ class ImageContentUrl(BaseModel):
 
 
 class ImageContent(BaseModel):
-    type: Literal["image_url"]
+    type: Literal["image_url"] = "image_url"
     image_url: ImageContentUrl
 
 

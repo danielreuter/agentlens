@@ -12,6 +12,7 @@ import petname
 from pydantic import BaseModel, Field
 
 from agentlens.hooks import Hook
+from agentlens.provider import InferenceCost
 from agentlens.utils import now
 
 T = TypeVar("T")
@@ -72,12 +73,13 @@ class Observation(BaseModel):
 
 class Run(Generic[T]):
     def __init__(self, runs_dir: Path, name: str):
-        self.key = self._create_run_key()
-        self.dir = runs_dir / self.key
+        self.id = self._create_run_id()
+        self.dir = runs_dir / self.id
         self.dir.mkdir(parents=True, exist_ok=True)
         self.hooks: dict[str, list[Hook]] = {}
         self.observation = Observation(name=name)
         self.observation_stack: list[Observation] = [self.observation]
+        self.inference_cost = InferenceCost()
 
         # Context stores
         self.context_values: dict[str, Any] = {}
@@ -102,10 +104,10 @@ class Run(Generic[T]):
     def do_cache(self, value: bool) -> None:
         _do_cache.set(value)
 
-    def _create_run_key(self) -> str:
+    def _create_run_id(self) -> str:
         timestamp = now().strftime("%Y%m%d_%H%M%S")
-        id = petname.generate(words=3, separator="_")
-        return f"{timestamp}_{id}"
+        key = petname.generate(words=3, separator="_")
+        return f"{timestamp}_{key}"
 
     @contextmanager
     def create_observation(
