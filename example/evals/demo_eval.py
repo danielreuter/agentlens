@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 
 import agentlens.evaluation as ev
-from agentlens import lens, provide, task
+from agentlens import gather, lens, provide, task
 from example.agent import check_integrity, extract_total_cost, process_invoice
 from example.config import openai
 from example.datasets import InvoiceDataset, InvoiceExample
@@ -21,7 +21,7 @@ def run_process_invoice_simple_sync():
 
 
 # simple async eval
-# - demonstrates `lens.gather`
+# - demonstrates `gather`
 @task
 async def run_process_invoice_simple_async():
     dataset = InvoiceDataset("september")
@@ -30,7 +30,7 @@ async def run_process_invoice_simple_async():
         return await process_invoice(invoice)
 
     tasks = [run(invoice) for invoice in dataset]
-    await lens.gather(*tasks, desc="Processing invoices")
+    await gather(*tasks, desc="Processing invoices")
 
 
 # simple context
@@ -91,7 +91,7 @@ async def bootstrap_invoice_labels():
             return await process_invoice(example.markdown)
 
     tasks = [eval(example) for example in dataset]
-    await lens.gather(*tasks, desc="Processing invoices")
+    await gather(*tasks, desc="Processing invoices")
 
     dataset.save()
 
@@ -132,7 +132,7 @@ async def eval_process_invoice():
             return await process_invoice(example.markdown)
 
     tasks = [eval(example) for example in dataset]
-    results = await lens.gather(*tasks, desc="Processing invoices")
+    results = await gather(*tasks, desc="Processing invoices")
 
     (lens / "report.json").write_text(
         json.dumps(

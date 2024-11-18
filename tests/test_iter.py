@@ -1,8 +1,6 @@
 import pytest
 
-from agentlens import lens, task
-from agentlens.client import provide
-from agentlens.context import Run
+from agentlens import gather, iterate, lens, provide, task
 
 
 @task
@@ -18,7 +16,7 @@ async def test_async_iteration_labeling():
     @task
     async def outer_task():
         tasks = [inner_task(i) for i in range(3)]
-        return await lens.gather(*tasks, desc="testing iteration")
+        return await gather(*tasks, desc="testing iteration")
 
     results = await outer_task()
     assert results == [0, 1, 2]
@@ -39,12 +37,12 @@ async def test_nested_async_iteration():
     async def mid_task(idx: int):
         assert idx == lens.task.iteration
         tasks = [leaf_task(i) for i in range(2)]
-        await lens.gather(*tasks, desc="inner tasks")
+        await gather(*tasks, desc="inner tasks")
 
     @task
     async def root_task():
         tasks = [mid_task(i) for i in range(2)]
-        await lens.gather(*tasks, desc="outer tasks")
+        await gather(*tasks, desc="outer tasks")
 
     await root_task()
     assert len(results) == 4  # 2 mid_tasks * 2 leaf_tasks
@@ -61,8 +59,8 @@ def test_sync_iteration():
     @task
     async def run_test():
         with provide():
-            for i in lens.iter(range(3)):
-                assert i == Run.current_iteration()
+            for i in iterate(range(3)):
+                assert i == lens.task.iteration
                 await record_iteration()  # Actually execute the task
 
     import asyncio
@@ -84,14 +82,14 @@ async def test_iteration_cleanup():
     async def parent_task():
         # Should reset between gather() calls
         tasks1 = [check_iteration(i) for i in range(2)]
-        await lens.gather(*tasks1)
+        await gather(*tasks1)
 
         # Verify iteration is None after gather
-        assert Run.current_iteration() is None
+        assert lens.task.iteration is None
 
         # Second batch should start fresh
         tasks2 = [check_iteration(i) for i in range(2)]
-        await lens.gather(*tasks2)
+        await gather(*tasks2)
 
     await parent_task()
 
@@ -109,11 +107,11 @@ async def test_concurrent_iteration_isolation():
     @task
     async def branch_task(branch_idx: int):
         tasks = [leaf_task() for _ in range(2)]
-        await lens.gather(*tasks, desc=f"branch {branch_idx}")
+        await gather(*tasks, desc=f"branch {branch_idx}")
 
     # Run two branches concurrently
     tasks = [branch_task(i) for i in range(2)]
-    await lens.gather(*tasks)
+    await gather(*tasks)
 
     # Each branch should have its leaf tasks numbered 0,1
     assert sorted(results) == [0, 0, 1, 1]

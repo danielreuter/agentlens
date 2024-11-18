@@ -64,7 +64,7 @@ class Anthropic(Provider):
 
         self._update_cost(model, completion, inference_cost)
         assert completion.content is not None
-        return completion.content
+        return completion.content[0].text
 
     async def generate_object(
         self,

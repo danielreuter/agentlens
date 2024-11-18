@@ -85,17 +85,6 @@ async def test_mock_must_be_async(lens: Lens):
             await simple_task(5)
 
 
-@task
-@pytest.mark.asyncio
-async def test_mock_return_type(lens: Lens):
-    """Test that mocks with wrong return type are rejected"""
-    with pytest.raises(TypeError, match="Mock callback must return same type as target"):
-
-        @ev.mock(simple_task)
-        async def wrong_return(x: int) -> str:
-            return "wrong"
-
-
 @task  # Tests for Mock behavior
 @pytest.mark.asyncio
 async def test_mock_simple(lens: Lens):

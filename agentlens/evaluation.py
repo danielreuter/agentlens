@@ -3,7 +3,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Coroutine,
     Generator,
     TypeVar,
     get_type_hints,
@@ -67,8 +66,7 @@ class Wrapper:
         self._check_return_type(callback_hints["return"], target_hints["return"])
 
     def _check_return_type(self, callback_return: type, target_return: type) -> None:
-        """Subclasses should implement this to check specific return type requirements"""
-        raise NotImplementedError
+        pass
 
 
 class Hook(Wrapper):
@@ -78,10 +76,6 @@ class Hook(Wrapper):
         """Execute the hook around a function call"""
         mock_kwargs = self._build_kwargs(args, kwargs)
         return self.callback(**mock_kwargs)
-
-    def _check_return_type(self, callback_return: type, target_return: type) -> None:
-        """Temporarily disabled type checking"""
-        pass
 
 
 class Mock(Wrapper):
@@ -99,21 +93,6 @@ class Mock(Wrapper):
         mock_kwargs = self._build_kwargs((), kwargs)
         result = await self.callback(**mock_kwargs)
         return result
-
-    def _check_return_type(self, callback_return: type, target_return: type) -> None:
-        # For async functions, we need to check the inner return type
-        if hasattr(callback_return, "__origin__") and callback_return.__origin__ is Coroutine:
-            callback_return = callback_return.__args__[
-                2
-            ]  # Get the return type from Coroutine[Any, Any, R]
-        if hasattr(target_return, "__origin__") and target_return.__origin__ is Coroutine:
-            target_return = target_return.__args__[2]
-
-        if callback_return != target_return:
-            raise TypeError(
-                f"Mock callback must return same type as target. "
-                f"Expected {target_return}, got {callback_return}"
-            )
 
 
 class MockMiss(Exception):
@@ -138,17 +117,6 @@ def hook(target_fn: Callable[..., Awaitable[Any]]) -> Callable[[Callable], Hook]
 
 
 def mock(target_fn: Callable[..., Awaitable[Any]]) -> Callable[[Callable], Mock]:
-    """Decorator to create a mock for a target function.
-
-    The mock function must be async and return the same type as the target function,
-    or raise MockMiss to fall back to the original function.
-
-    Example:
-        @mock(target_function)
-        async def mock_implementation(x: int) -> int:
-            return x * 2
-    """
-
     def decorator(mock_fn: Callable) -> Mock:
         if not hasattr(mock_fn, "__name__"):
             raise ValueError("Mock function must have a __name__ attribute")

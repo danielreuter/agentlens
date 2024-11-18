@@ -5,12 +5,9 @@ from logging import getLogger
 from pathlib import Path
 from typing import (
     Any,
-    Awaitable,
     Callable,
     Coroutine,
     Generator,
-    Iterable,
-    Iterator,
     ParamSpec,
     Type,
     TypeVar,
@@ -18,11 +15,10 @@ from typing import (
     overload,
 )
 
-from tqdm.asyncio import tqdm_asyncio
-
 from agentlens.constants import RUNS_DIR
 from agentlens.context import Run, Task
 from agentlens.evaluation import Hook, HookGenerator, Mock, MockMiss, convert_to_kwargs
+from agentlens.serialization import serialize_value, write_json
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -78,6 +74,7 @@ def _provide_run(task_name: str) -> Generator[Run, None, None]:
     run = Run.current()
     if run is None:
         run = Run.start(RUNS_DIR, task_name)
+        print(f"[agentlens] run directory: {run.dir}")
         yield run
         Run.end()
     else:
@@ -88,20 +85,12 @@ def _provide_run(task_name: str) -> Generator[Run, None, None]:
 def task(fn: F) -> F: ...
 
 
-@overload
-def task(
-    fn: None = None,
-    *,
-    name: str | None = None,
-    mock: Callable | None = None,
-) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]: ...
-
-
 def task(
     fn: Callable[P, Coroutine[Any, Any, R]] | None = None,
     *,
     name: str | None = None,
-    mock: Callable | None = None,
+    capture_input: bool = True,
+    capture_output: bool = True,
 ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]:
     def decorator(
         fn: Callable[P, Coroutine[Any, Any, R]],
@@ -109,13 +98,18 @@ def task(
         if name:
             fn.__name__ = name
 
-        if mock is not None:
-            setattr(fn, "_mock_fn", Mock(mock, fn))
-
         @wraps(fn)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             with _provide_run(fn.__name__) as run:
-                with run.create_observation(fn.__name__):
+                with run.create_observation(fn.__name__) as observation:
+                    # Convert args to kwargs
+                    all_kwargs = convert_to_kwargs(fn, args, kwargs)
+
+                    # Save input if requested
+                    if capture_input:
+                        input_data = {k: serialize_value(v) for k, v in all_kwargs.items()}
+                        write_json(input_data, observation.dir / "input.json")
+
                     # Get hooks for this function
                     hooks = run.hooks.current.get(fn.__name__, []) if run.hooks.current else []
 
@@ -143,6 +137,11 @@ def task(
                     except MockMiss:
                         result = await fn(**all_kwargs)
 
+                    # Save output if requested
+                    if capture_output:
+                        output_data = {"result": serialize_value(result)}
+                        write_json(output_data, observation.dir / "output.json")
+
                     # send result to generator hooks
                     for gen in generators:
                         try:
@@ -155,7 +154,7 @@ def task(
         return wrapper
 
     if fn is not None:
-        return decorator(fn)
+        return decorator(fn)  # type: ignore[return-value]
     else:
         return decorator
 
@@ -211,22 +210,13 @@ class Lens:
             )
         contexts[key] = value
 
-    def iter(self, iterable: Iterable[T], desc: str | None = None) -> Iterator[T]:
-        for i, item in enumerate(iterable):
-            Run.set_iteration(i)
-            yield item
-            Run.set_iteration(None)
-
-    async def gather(self, *coros: Awaitable[T], desc: str | None = None) -> list[T]:
-        async def eval_coro(i: int, coro: Awaitable[T]) -> T:
-            Run.set_iteration(i)
-            try:
-                return await coro
-            finally:
-                Run.set_iteration(None)
-
-        tasks = [eval_coro(i, coro) for i, coro in enumerate(coros)]
-        return await tqdm_asyncio.gather(*tasks, desc=desc)
+    def increase_cost(self, *, input: float = 0.0, output: float = 0.0) -> None:
+        """Increase cost for current observation and all parent observations"""
+        run = self.run
+        # Get all observations in the stack, from current to root
+        for observation in run.observations.stack:
+            observation.cost.input += input
+            observation.cost.output += output
 
 
 lens = Lens()

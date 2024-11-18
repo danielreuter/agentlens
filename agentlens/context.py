@@ -5,11 +5,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, Iterator, TypeVar
 
 import petname
 
-from agentlens.evaluation import Hook
+from agentlens.evaluation import Hook, Mock
 from agentlens.provider import InferenceCost
 from agentlens.stack import ContextStack
 from agentlens.utils import now
@@ -27,6 +27,7 @@ class Observation:
     start_time: datetime = field(default_factory=now)
     end_time: datetime | None = None
     iteration: int | None = None
+    cost: InferenceCost = field(default_factory=InferenceCost)
 
     def end(self) -> None:
         self.end_time = now()
@@ -39,10 +40,9 @@ class Run(Observation):
     def __init__(self, runs_dir: Path, task_name: str):
         id = self._create_run_id()
         super().__init__(id=id, dir=runs_dir / id)
-        self.cost = InferenceCost()
         self.contexts = ContextStack[dict[str, Any]]("contexts")
         self.hooks = ContextStack[dict[str, list[Hook]]]("hooks")
-        self.mocks = ContextStack[dict[Callable, Callable]]("mocks")
+        self.mocks = ContextStack[dict[str, Mock]]("mocks")
         self.observations = ContextStack[Observation]("observations")
 
         # Create and push root task
@@ -82,6 +82,7 @@ class Run(Observation):
     @staticmethod
     def start(runs_dir: Path, task_name: str) -> Run:
         run = Run(runs_dir, task_name)
+        run.dir.mkdir(parents=True, exist_ok=True)
         _run_context.set(run)
         return run
 
@@ -101,6 +102,7 @@ class Run(Observation):
             iteration=idx,
             dir=parent.dir / (name + (f"_{idx}" if idx is not None else "")),
         )
+        observation.dir.mkdir(parents=True, exist_ok=True)
 
         with self.observations.push(observation):
             try:

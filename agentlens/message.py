@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import textwrap
-from typing import Literal, Union
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -22,10 +22,10 @@ class ImageContent(BaseModel):
 
 MessageRole = Literal["system", "user", "assistant"]
 
-RawMessageContent = Union[str, tuple[Union[str, ImageContent], ...]]
+RawMessageContent = tuple[str | ImageContent] | str
 """Text content is passed in as a string"""
 
-MessageContent = Union[str, list[Union[TextContent, ImageContent]]]
+MessageContent = list[TextContent | ImageContent] | str
 """Text content has been formatted as JSON"""
 
 
@@ -37,17 +37,13 @@ class Message(BaseModel):
 
     @staticmethod
     def message(role: MessageRole, raw_content: RawMessageContent) -> Message:
-        content = raw_content
-
-        # convert tuple to list and replace text strings with TextContent
-        if isinstance(content, tuple):
-            content = [
-                TextContent(text=text) if isinstance(text, str) else text for text in content
-            ]
-
         return Message(
             role=role,
-            content=content,
+            content=[
+                TextContent(text=text) if isinstance(text, str) else text for text in raw_content
+            ]
+            if isinstance(raw_content, tuple)
+            else raw_content,
         )
 
     @staticmethod
@@ -96,5 +92,5 @@ def assistant_message(raw_content: RawMessageContent) -> Message:
     return Message.assistant(raw_content)
 
 
-def image_message(url: str) -> ImageContent:
+def image_content(url: str) -> ImageContent:
     return Message.image(url)
