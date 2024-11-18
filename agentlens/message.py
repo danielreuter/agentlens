@@ -22,7 +22,7 @@ class ImageContent(BaseModel):
 
 MessageRole = Literal["system", "user", "assistant"]
 
-RawMessageContent = Union[str, list[Union[str, ImageContent]]]
+RawMessageContent = Union[str, tuple[Union[str, ImageContent], ...]]
 """Text content is passed in as a string"""
 
 MessageContent = Union[str, list[Union[TextContent, ImageContent]]]
@@ -39,8 +39,8 @@ class Message(BaseModel):
     def message(role: MessageRole, raw_content: RawMessageContent) -> Message:
         content = raw_content
 
-        # replace text strings with TextContent in lists
-        if isinstance(content, list):
+        # convert tuple to list and replace text strings with TextContent
+        if isinstance(content, tuple):
             content = [
                 TextContent(text=text) if isinstance(text, str) else text for text in content
             ]
