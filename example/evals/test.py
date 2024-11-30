@@ -1,16 +1,29 @@
+import json
+
 from pydantic import BaseModel
 
-from agentlens import gather, generate_text, lens, task
-from example.config import anthropic
+from agentlens import gather, generate_object, lens, task
+from example.config import openai
 
 
 @task
 async def shit():
-    await generate_text(
-        model=anthropic / "claude-3-5-sonnet-20241022",
+    response = await generate_object(
+        model=openai / "gpt-4o-mini",
+        schema={
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "string"},
+            },
+            "required": ["a", "b"],
+            "additionalProperties": False,
+        },
         system="You are a helpful assistant.",
         prompt="What is the capital of France?",
     )
+    (lens.task.dir / "response.json").write_text(json.dumps(response))
+    return response
 
 
 class Test(BaseModel):

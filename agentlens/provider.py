@@ -4,7 +4,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from textwrap import dedent
-from typing import Type, TypeVar
+from typing import Type, TypeVar, overload
 
 from pydantic import BaseModel
 
@@ -68,6 +68,7 @@ class Provider(ABC):
     ) -> str:
         pass
 
+    @overload
     @abstractmethod
     async def generate_object(
         self,
@@ -76,7 +77,28 @@ class Provider(ABC):
         messages: list[Message],
         schema: Type[T],
         **kwargs,
-    ) -> T:
+    ) -> T: ...
+
+    @overload
+    @abstractmethod
+    async def generate_object(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        schema: dict,
+        **kwargs,
+    ) -> dict: ...
+
+    @abstractmethod
+    async def generate_object(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        schema: Type[T] | dict,
+        **kwargs,
+    ) -> T | dict:
         pass
 
     def __truediv__(self, model: str) -> Model:

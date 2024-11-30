@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import random
-from typing import Any, Awaitable, Callable, Type, TypeVar
+from typing import Any, Awaitable, Callable, Type, TypeVar, overload
 
 from pydantic import BaseModel
 from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
 
-from agentlens.message import system_message, user_message
+from agentlens.client import lens
+from agentlens.message import TextContent, system_message, user_message
 from agentlens.provider import Message, Model
 
 logger = logging.getLogger(__name__)
@@ -17,10 +18,11 @@ T = TypeVar("T", bound=BaseModel)
 async def generate_text(
     model: Model,
     messages: list[Message] | None = None,
-    system: str | None = None,
-    prompt: str | None = None,
+    system: str | dict[str, str | dict] | None = None,
+    prompt: str | dict[str, str | dict] | None = None,
     dedent: bool = True,
     max_retries: int = 3,
+    log_messages: bool = False,
     **kwargs,
 ) -> str:
     return await _generate(
@@ -32,22 +34,51 @@ async def generate_text(
         prompt=prompt,
         dedent=dedent,
         max_retries=max_retries,
+        log_messages=log_messages,
         **kwargs,
     )
 
 
+@overload
 async def generate_object(
     model: Model,
     schema: Type[T],
     messages: list[Message] | None = None,
-    system: str | None = None,
-    prompt: str | None = None,
+    system: str | dict[str, str | dict] | None = None,
+    prompt: str | dict[str, str | dict] | None = None,
     dedent: bool = True,
     max_retries: int = 3,
+    log_messages: bool = False,
     **kwargs,
-) -> T:
-    # inline schemas may have invalid __name__ attributes -- replace w/ a default
-    if hasattr(schema, "__name__"):
+) -> T: ...
+
+
+@overload
+async def generate_object(
+    model: Model,
+    schema: dict[str, Any],
+    messages: list[Message] | None = None,
+    system: str | dict[str, str | dict] | None = None,
+    prompt: str | dict[str, str | dict] | None = None,
+    dedent: bool = True,
+    max_retries: int = 3,
+    log_messages: bool = False,
+    **kwargs,
+) -> dict[str, Any]: ...
+
+
+async def generate_object(
+    model: Model,
+    schema: Type[T] | dict[str, Any],
+    messages: list[Message] | None = None,
+    system: str | dict[str, str | dict] | None = None,
+    prompt: str | dict[str, str | dict] | None = None,
+    dedent: bool = True,
+    max_retries: int = 3,
+    log_messages: bool = False,
+    **kwargs,
+) -> T | dict[str, Any]:
+    if isinstance(schema, type) and hasattr(schema, "__name__"):
         schema.__name__ = "Response"
     return await _generate(
         model.provider.generate_object,
@@ -59,6 +90,7 @@ async def generate_object(
         prompt=prompt,
         dedent=dedent,
         max_retries=max_retries,
+        log_messages=log_messages,
         **kwargs,
     )
 
@@ -68,10 +100,11 @@ async def _generate(
     semaphore: asyncio.Semaphore,
     model_name: str,
     messages: list[Message] | None,
-    system: str | None,
-    prompt: str | None,
+    system: str | dict[str, str | dict] | None,
+    prompt: str | dict[str, str | dict] | None,
     dedent: bool,
     max_retries: int,
+    log_messages: bool,
     **kwargs,
 ) -> Any:
     collected_messages = _create_messages(
@@ -80,6 +113,16 @@ async def _generate(
         prompt=prompt,
         dedent=dedent,
     )
+    if log_messages:
+        with (lens.task.dir / "messages.md").open("a") as f:
+            for m in collected_messages:
+                role = m.role.upper()
+                content = (
+                    m.content
+                    if isinstance(m.content, str)
+                    else "\n".join(item.text for item in m.content if isinstance(item, TextContent))
+                )
+                f.write(f"## {role}\n{content}\n\n")
     try:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(max_retries),
@@ -107,8 +150,8 @@ async def _generate(
 
 def _create_messages(
     messages: list[Message] | None = None,
-    system: str | None = None,
-    prompt: str | None = None,
+    system: str | dict[str, str | dict] | None = None,
+    prompt: str | dict[str, str | dict] | None = None,
     dedent: bool = True,
 ) -> list[Message]:
     # check for invalid combinations
@@ -119,9 +162,8 @@ def _create_messages(
     if not messages:
         messages = []
         if system:
-            messages.append(system_message(system))
+            messages.append(system_message(system, dedent=dedent))
         if prompt:
-            messages.append(user_message(prompt))
+            messages.append(user_message(prompt, dedent=dedent))
 
-    # apply dedent if needed
-    return messages if not dedent else [m.dedent() for m in messages]
+    return messages

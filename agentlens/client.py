@@ -89,8 +89,8 @@ def task(fn: F) -> F: ...
 def task(
     *,
     name: str | None = None,
-    capture_input: bool = True,
-    capture_output: bool = True,
+    log_input: bool = True,
+    log_output: bool = True,
 ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]: ...
 
 
@@ -98,8 +98,8 @@ def task(
     fn: Callable[P, Coroutine[Any, Any, R]] | None = None,
     *,
     name: str | None = None,
-    capture_input: bool = True,
-    capture_output: bool = True,
+    log_input: bool = True,
+    log_output: bool = True,
 ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]:
     def decorator(
         fn: Callable[P, Coroutine[Any, Any, R]],
@@ -115,7 +115,7 @@ def task(
                     all_kwargs = convert_to_kwargs(fn, args, kwargs)
 
                     # Save input if requested
-                    if capture_input:
+                    if log_input:
                         input_data = {k: serialize_value(v) for k, v in all_kwargs.items()}
                         write_json(input_data, observation.dir / "input.json")
 
@@ -147,7 +147,7 @@ def task(
                         result = await fn(**all_kwargs)
 
                     # Save output if requested
-                    if capture_output:
+                    if log_output:
                         output_data = {"result": serialize_value(result)}
                         write_json(output_data, observation.dir / "output.json")
 

@@ -1,4 +1,5 @@
-from typing import Any, Type, TypeVar
+import json
+from typing import Any, Type, TypeVar, overload
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -80,6 +81,7 @@ class OpenAI(Provider):
         assert completion.choices[0].message.content is not None
         return completion.choices[0].message.content
 
+    @overload
     async def generate_object(
         self,
         *,
@@ -87,14 +89,52 @@ class OpenAI(Provider):
         messages: list[Message],
         schema: Type[T],
         **kwargs,
-    ) -> T:
-        completion = await self.client.beta.chat.completions.parse(
-            model=model,
-            messages=[message.model_dump() for message in messages],  # type: ignore
-            response_format=schema,
-            **kwargs,
-        )
+    ) -> T: ...
 
-        self._update_cost(model, completion)
-        assert completion.choices[0].message.parsed is not None
-        return completion.choices[0].message.parsed
+    @overload
+    async def generate_object(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        schema: dict,
+        **kwargs,
+    ) -> dict: ...
+
+    async def generate_object(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        schema: Type[T] | dict,
+        **kwargs,
+    ) -> T | dict:
+        if not isinstance(schema, dict):
+            completion = await self.client.beta.chat.completions.parse(
+                model=model,
+                messages=[message.model_dump() for message in messages],  # type: ignore
+                response_format=schema,
+                **kwargs,
+            )
+
+            self._update_cost(model, completion)
+            assert completion.choices[0].message.parsed is not None
+            return completion.choices[0].message.parsed
+        else:
+            completion = await self.client.chat.completions.create(
+                model=model,
+                messages=[m.model_dump() for m in messages],  # type: ignore
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "params",
+                        "schema": schema,
+                        "strict": True,
+                    },
+                },
+                **kwargs,
+            )
+
+            self._update_cost(model, completion)
+            assert completion.choices[0].message.content is not None
+            return json.loads(completion.choices[0].message.content)

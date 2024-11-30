@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from agentlens.utils import format_prompt
+
 
 class TextContent(BaseModel):
     type: Literal["text"] = "text"
@@ -22,10 +24,10 @@ class ImageContent(BaseModel):
 
 MessageRole = Literal["system", "user", "assistant"]
 
-RawMessageContent = str | ImageContent
-"""Text content is passed in as a string"""
+RawMessageContent = str | ImageContent | dict[str, str | dict]
+"""Text content is passed in as a string or dictionary"""
 
-MessageContent = list[TextContent | ImageContent] | str
+MessageContent = list[TextContent | ImageContent] | ImageContent | str
 """Text content has been formatted as JSON"""
 
 
@@ -36,25 +38,37 @@ class Message(BaseModel):
     content: MessageContent
 
     @staticmethod
-    def message(role: MessageRole, *raw_content: RawMessageContent) -> Message:
-        return Message(
-            role=role,
-            content=[
-                TextContent(text=text) if isinstance(text, str) else text for text in raw_content
-            ],
-        )
+    def _format_content(
+        content: RawMessageContent, dedent: bool = True
+    ) -> TextContent | ImageContent:
+        if isinstance(content, (str, dict)):
+            text = format_prompt(content)
+            return TextContent(text=textwrap.dedent(text) if dedent else text)
+        else:
+            return content
 
     @staticmethod
-    def system(*raw_content: RawMessageContent) -> Message:
-        return Message.message("system", *raw_content)
+    def message(role: MessageRole, *raw_content: RawMessageContent, dedent: bool = True) -> Message:
+        if len(raw_content) == 1:
+            content = Message._format_content(raw_content[0], dedent)
+            return Message(
+                role=role, content=content.text if isinstance(content, TextContent) else content
+            )
+        else:
+            content = [Message._format_content(item, dedent) for item in raw_content]
+            return Message(role=role, content=content)
 
     @staticmethod
-    def user(*raw_content: RawMessageContent) -> Message:
-        return Message.message("user", *raw_content)
+    def system(*raw_content: RawMessageContent, dedent: bool = True) -> Message:
+        return Message.message("system", *raw_content, dedent=dedent)
 
     @staticmethod
-    def assistant(*raw_content: RawMessageContent) -> Message:
-        return Message.message("assistant", *raw_content)
+    def user(*raw_content: RawMessageContent, dedent: bool = True) -> Message:
+        return Message.message("user", *raw_content, dedent=dedent)
+
+    @staticmethod
+    def assistant(*raw_content: RawMessageContent, dedent: bool = True) -> Message:
+        return Message.message("assistant", *raw_content, dedent=dedent)
 
     @staticmethod
     def image(url: str) -> ImageContent:
@@ -63,31 +77,17 @@ class Message(BaseModel):
             image_url=ImageContentUrl(url=url),
         )
 
-    def dedent(self) -> Message:
-        if isinstance(self.content, str):
-            return Message(role=self.role, content=textwrap.dedent(self.content))
-        else:
-            return Message(
-                role=self.role,
-                content=[
-                    TextContent(text=textwrap.dedent(item.text))
-                    if isinstance(item, TextContent)
-                    else item
-                    for item in self.content
-                ],
-            )
+
+def user_message(*raw_content: RawMessageContent, dedent: bool = True) -> Message:
+    return Message.user(*raw_content, dedent=dedent)
 
 
-def user_message(*raw_content: RawMessageContent) -> Message:
-    return Message.user(*raw_content)
+def system_message(*raw_content: RawMessageContent, dedent: bool = True) -> Message:
+    return Message.system(*raw_content, dedent=dedent)
 
 
-def system_message(*raw_content: RawMessageContent) -> Message:
-    return Message.system(*raw_content)
-
-
-def assistant_message(*raw_content: RawMessageContent) -> Message:
-    return Message.assistant(*raw_content)
+def assistant_message(*raw_content: RawMessageContent, dedent: bool = True) -> Message:
+    return Message.assistant(*raw_content, dedent=dedent)
 
 
 def image_content(url: str) -> ImageContent:
