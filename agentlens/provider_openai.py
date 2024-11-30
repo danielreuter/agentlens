@@ -31,7 +31,7 @@ class OpenAI(Provider):
         max_connections_default: int = 10,
     ):
         super().__init__(
-            name="anthropic",
+            name="openai",
             max_connections=max_connections,
             max_connections_default=max_connections_default,
         )
@@ -56,12 +56,12 @@ class OpenAI(Provider):
         model: str,
         response: Any,
     ) -> None:
-        cost = lens.run.cost
         usage = self._extract_usage(response)
-        if usage:
-            input_cost_per_token, output_cost_per_token = self.get_token_costs(model)
-            cost.input += usage.input_tokens * input_cost_per_token / 1_000_000
-            cost.output += usage.output_tokens * output_cost_per_token / 1_000_000
+        input_cost_per_token, output_cost_per_token = self.get_token_costs(model)
+        lens.increase_cost(
+            input=usage.input_tokens * input_cost_per_token / 1_000_000,
+            output=usage.output_tokens * output_cost_per_token / 1_000_000,
+        )
 
     async def generate_text(
         self,

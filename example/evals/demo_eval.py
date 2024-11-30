@@ -10,19 +10,11 @@ from example.datasets import InvoiceDataset, InvoiceExample
 # Inference provider
 
 
-# simple sync eval
-# - demonstrates `lens.iter`
-@task
-def run_process_invoice_simple_sync():
-    dataset = InvoiceDataset("september")
-
-    for invoice in lens.iter(dataset, desc="Processing invoices"):
-        process_invoice(invoice)
-
-
 # simple async eval
 # - demonstrates `gather`
-@task
+@task(
+    capture_input=False,
+)
 async def run_process_invoice_simple_async():
     dataset = InvoiceDataset("september")
 

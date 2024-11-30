@@ -85,6 +85,15 @@ def _provide_run(task_name: str) -> Generator[Run, None, None]:
 def task(fn: F) -> F: ...
 
 
+@overload
+def task(
+    *,
+    name: str | None = None,
+    capture_input: bool = True,
+    capture_output: bool = True,
+) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]: ...
+
+
 def task(
     fn: Callable[P, Coroutine[Any, Any, R]] | None = None,
     *,
@@ -141,6 +150,10 @@ def task(
                     if capture_output:
                         output_data = {"result": serialize_value(result)}
                         write_json(output_data, observation.dir / "output.json")
+
+                    cost = observation.cost
+                    if cost.input > 0 or cost.output > 0:
+                        (observation.dir / "cost.txt").write_text(str(cost))
 
                     # send result to generator hooks
                     for gen in generators:

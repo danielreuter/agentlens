@@ -1,13 +1,14 @@
 from pydantic import BaseModel
 
 from agentlens import gather, generate_text, lens, task
-from example.config import openai
+from example.config import anthropic
 
 
 @task
 async def shit():
     await generate_text(
-        model=openai / "o1-preview",
+        model=anthropic / "claude-3-5-sonnet-20241022",
+        system="You are a helpful assistant.",
         prompt="What is the capital of France?",
     )
 

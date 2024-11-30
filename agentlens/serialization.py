@@ -32,7 +32,5 @@ def serialize_value(value: Any) -> Any:
 
 
 def write_json(data: dict, path: Path) -> None:
-    """Write data to a JSON file, creating parent directories if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2, default=str)
+    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
