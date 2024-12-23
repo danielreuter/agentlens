@@ -1,38 +1,31 @@
-from .client import lens, provide, task
-from .dataset import Dataset
-from .evaluation import HookGenerator
-from .inference import generate_object, generate_text
-from .iterate import gather, iterate
-from .message import (
+from .client import provide, task, use
+from .evaluation import Hook, hook, mock
+from .inference import (
     Message,
+    Model,
+    ModelProvider,
     assistant_message,
+    generate_object,
+    generate_text,
     image_content,
     system_message,
     user_message,
 )
-from .provider import Model, Provider
-from .provider_anthropic import Anthropic
-from .provider_openai import OpenAI
 
 __all__ = [
-    "AI",
-    "OpenAI",
-    "Anthropic",
-    "Provider",
-    "Model",
-    "Dataset",
-    "lens",
-    "client",
-    "HookGenerator",
+    "use",
     "task",
     "provide",
+    "Model",
+    "ModelProvider",
+    "generate_object",
+    "generate_text",
     "Message",
     "system_message",
     "user_message",
     "assistant_message",
     "image_content",
-    "generate_object",
-    "generate_text",
-    "gather",
-    "iterate",
+    "Hook",
+    "hook",
+    "mock",
 ]

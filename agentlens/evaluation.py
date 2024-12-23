@@ -5,13 +5,12 @@ from typing import (
     Callable,
     Generator,
     TypeVar,
-    get_type_hints,
 )
 
 T = TypeVar("T")
 R = TypeVar("R")
 
-HookGenerator = Generator[dict[str, Any], T, None]
+Hook = Generator[dict[str, Any] | None, T, None]
 """A wrapper-type hook"""
 
 
@@ -22,7 +21,6 @@ class Wrapper:
         self.callback = callback
         self.target = target
         self._validate_params()
-        self._validate_return_type()
 
     def _validate_params(self) -> None:
         """Validate that callback only requests parameters that exist in target function"""
@@ -54,31 +52,17 @@ class Wrapper:
 
         return callback_kwargs
 
-    def _validate_return_type(self) -> None:
-        """Validate the return type of the callback matches expectations"""
-        # Skip validation if type hints are missing
-        target_hints = get_type_hints(self.target)
-        callback_hints = get_type_hints(self.callback)
 
-        if not (target_hints.get("return") and callback_hints.get("return")):
-            return
-
-        self._check_return_type(callback_hints["return"], target_hints["return"])
-
-    def _check_return_type(self, callback_return: type, target_return: type) -> None:
-        pass
-
-
-class Hook(Wrapper):
+class HookFn(Wrapper):
     """A hook that can intercept and modify function calls"""
 
-    def __call__(self, args: tuple, kwargs: dict) -> HookGenerator | None:
+    def __call__(self, args: tuple, kwargs: dict) -> Hook | None:
         """Execute the hook around a function call"""
         mock_kwargs = self._build_kwargs(args, kwargs)
         return self.callback(**mock_kwargs)
 
 
-class Mock(Wrapper):
+class MockFn(Wrapper):
     """A mock that replaces a function call"""
 
     target_name: str  # Store the target function name for lookup
@@ -101,25 +85,25 @@ class MockMiss(Exception):
     pass
 
 
-def convert_to_kwargs(fn: Callable, args: tuple, kwargs: dict) -> dict[str, Any]:
+def format_input_dict(fn: Callable, args: tuple, kwargs: dict) -> dict[str, Any]:
     bound_args = signature(fn).bind(*args, **kwargs)
     bound_args.apply_defaults()
     return dict(bound_args.arguments)
 
 
-def hook(target_fn: Callable[..., Awaitable[Any]]) -> Callable[[Callable], Hook]:
-    def decorator(hook_fn: Callable) -> Hook:
+def hook(target_fn: Callable[..., Awaitable[Any]]) -> Callable[[Callable], HookFn]:
+    def decorator(hook_fn: Callable) -> HookFn:
         if not hasattr(hook_fn, "__name__"):
-            raise ValueError("Hook function must have a __name__ attribute")
-        return Hook(hook_fn, target_fn)
+            raise ValueError("Hooked functions must have a __name__ attribute")
+        return HookFn(hook_fn, target_fn)
 
     return decorator
 
 
-def mock(target_fn: Callable[..., Awaitable[Any]]) -> Callable[[Callable], Mock]:
-    def decorator(mock_fn: Callable) -> Mock:
+def mock(target_fn: Callable[..., Awaitable[Any]]) -> Callable[[Callable], MockFn]:
+    def decorator(mock_fn: Callable) -> MockFn:
         if not hasattr(mock_fn, "__name__"):
-            raise ValueError("Mock function must have a __name__ attribute")
-        return Mock(mock_fn, target_fn)
+            raise ValueError("Mocked functions must have a __name__ attribute")
+        return MockFn(mock_fn, target_fn)
 
     return decorator

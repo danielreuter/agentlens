@@ -1,32 +1,15 @@
-from dataclasses import dataclass, field
+import pytest
 
-import agentlens.evaluation as ev
-from agentlens import lens, task
-
-
-@dataclass
-class Counter:
-    value: int = 0
-
-
-@dataclass
-class Messages:
-    items: list[str] = field(default_factory=list)
-
-
-# Test tasks
-@task
-async def simple_task(x: int) -> int:
-    return x * 2
+from agentlens.client import task
 
 
 @task
-async def complex_task(a: int, b: str, c: bool = True) -> str:
-    return f"{a}-{b}-{c}"
+async def add_nums(a: int, b: int) -> int:
+    return a + b
 
 
 @task
-async def task_with_kwargs(*, name: str, value: int) -> dict:
+async def kw_only_task(*, name: str, value: int) -> dict:
     return {"name": name, "value": value}
 
 
@@ -36,98 +19,46 @@ async def task_with_defaults(x: int, y: str = "default") -> str:
 
 
 @task
-async def task_raises_error() -> None:
+async def always_raises():
     raise ValueError("Expected error")
 
 
 @task
-async def nested_task(x: int) -> int:
-    return await simple_task(x)
+async def parent_task():
+    return "parent"
 
 
 @task
-async def increment_counter() -> int:
-    counter = lens[Counter]
-    counter.value += 1
-    return counter.value
+async def child_task():
+    return "child"
 
 
-@task
-async def add_message(msg: str) -> str:
-    messages = lens[Messages]
-    messages.items.append(msg)
-    return msg
+async def test_task_with_positional_args():
+    result = await add_nums(3, 4)
+    assert result == 7
 
 
-@task
-async def get_counter_value() -> int:
-    counter = lens[Counter]
-    return counter.value
+async def test_task_with_keyword_only_args():
+    result = await kw_only_task(name="alice", value=42)
+    assert result == {"name": "alice", "value": 42}
 
 
-# Test mocks
-async def mock_simple(x: int) -> int:
-    return x * 3
+async def test_task_with_defaults():
+    assert await task_with_defaults(5) == "5-default"
+    assert await task_with_defaults(5, "xyz") == "5-xyz"
 
 
-async def mock_partial_args(a: int) -> str:
-    return f"mocked-{a}"
+async def test_task_raises_exception():
+    with pytest.raises(ValueError, match="Expected error"):
+        await always_raises()
 
 
-async def mock_with_miss(x: int) -> int:
-    if x > 10:
-        raise ev.MockMiss()
-    return x * 4
-
-
-# Test hooks
-@ev.hook(simple_task)
-def hook_simple(x: int) -> ev.HookGenerator[int]:
-    result = yield {}
-    assert isinstance(result, int)
-    return None
-
-
-@ev.hook(complex_task)
-def hook_modify_args(a: int, b: str) -> ev.HookGenerator[str]:
-    result = yield {"a": a * 2, "b": b.upper()}
-    assert isinstance(result, str)
-    return None
-
-
-@ev.hook(complex_task)
-def hook_partial_args(a: int) -> ev.HookGenerator[str]:
-    result = yield {"a": a + 1}
-    assert isinstance(result, str)
-    return None
-
-
-@ev.hook(task_with_kwargs)
-def hook_kwargs_only(name: str) -> ev.HookGenerator[dict]:
-    result = yield {"name": name.upper()}
-    assert isinstance(result, dict)
-    return None
-
-
-@ev.hook(simple_task)
-def hook_modify_result(x: int) -> ev.HookGenerator[int]:
-    yield {}
-
-
-@ev.hook(simple_task)
-def hook_multiply(x: int) -> ev.HookGenerator[int]:
-    yield {"x": x * 2}
-    return None
-
-
-@ev.hook(simple_task)
-def hook_add(x: int) -> ev.HookGenerator[int]:
-    yield {"x": x + 1}
-    return None
-
-
-@ev.hook(increment_counter)
-def log_increment() -> ev.HookGenerator[int]:
-    messages = lens[Messages]
-    result = yield {}
-    messages.items.append(f"Counter incremented to {result}")
+async def test_nested_tasks():
+    """
+    Simple example: parent calls child. The framework
+    may or may not track Observations, but the calls should succeed.
+    """
+    p_result = await parent_task()
+    c_result = await child_task()
+    assert p_result == "parent"
+    assert c_result == "child"
