@@ -13,7 +13,7 @@ R = TypeVar("R")
 Hook = Generator[dict[str, Any] | None, T, None]
 """A wrapper-type hook"""
 
-GLOBAL_HOOK_KEY = "__global__"  # NEW: Special key for global hooks
+GLOBAL_HOOK_KEY = "__global__"
 
 
 class Wrapper:
@@ -25,54 +25,85 @@ class Wrapper:
         self._validate_params()
 
     def _validate_params(self) -> None:
-        """Skip strict param-check if callback uses *args or **kwargs, or if target is None"""
+        """
+        Validation rules:
+        1) Target function cannot have a parameter named 'input'
+        2) If callback has 'input' param, it must be the only param
+        3) Otherwise fall back to normal validation (unless using *args/**kwargs)
+        """
         if self.target is None:
-            return
+            return  # skip validation for global hooks
+
+        # 1) Disallow 'input' in the real function's signature
+        target_sig = signature(self.target)
+        if "input" in target_sig.parameters:
+            raise ValueError(
+                f"Target function {self.target.__name__}() has a parameter named 'input'; "
+                f"'input' is reserved and not allowed."
+            )
 
         callback_sig = signature(self.callback)
-        # Skip validation if callback uses *args or **kwargs
+        callback_params = callback_sig.parameters
+
+        # 2) If using 'input', it must be the only parameter
+        if "input" in callback_params:
+            if len(callback_params) != 1:
+                raise ValueError(
+                    "If a hook/mock function declares a parameter named 'input', it cannot have "
+                    "any additional parameters."
+                )
+            return
+
+        # 3a) Skip validation if using *args/**kwargs
         if any(
             p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD)
-            for p in callback_sig.parameters.values()
+            for p in callback_params.values()
         ):
             return
 
-        # Normal validation for specific parameters
-        target_sig = signature(self.target)
-        callback_params = callback_sig.parameters
-        target_params = target_sig.parameters
-
+        # 3b) Normal parameter validation
         for name in callback_params:
-            if name not in target_params:
+            if name not in target_sig.parameters:
                 raise ValueError(
                     f"Parameter '{name}' does not exist in target function {self.target.__name__}. "
-                    f"Valid parameters are: {list(target_params.keys())}"
+                    f"Valid parameters are: {list(target_sig.parameters.keys())}"
                 )
 
     def _build_kwargs(self, args: tuple, kwargs: dict) -> dict[str, Any]:
-        """Build the kwargs dictionary for the callback based on its signature"""
+        """
+        Build kwargs for callback:
+        - If callback has 'input' param, pass all args in a single dict
+        - Otherwise use normal param matching or *args/**kwargs handling
+        """
         callback_sig = signature(self.callback)
+        callback_params = callback_sig.parameters
 
-        # If callback uses *args or **kwargs, pass everything
+        # Get all arguments from target function if it exists
+        if self.target is not None:
+            target_sig = signature(self.target)
+            bound_args = target_sig.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+            all_args = dict(bound_args.arguments)
+        else:
+            # For global hooks, combine raw args and kwargs
+            all_args = {**{str(i): v for i, v in enumerate(args)}, **kwargs}
+
+        # Special handling for 'input' parameter
+        if "input" in callback_params:
+            return {"input": all_args}
+
+        # Pass everything for *args/**kwargs
         if any(
             p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD)
-            for p in callback_sig.parameters.values()
+            for p in callback_params.values()
         ):
             return {**{str(i): v for i, v in enumerate(args)}, **kwargs}
 
-        # Otherwise, filter by param name
-        if self.target is not None:
-            target_sig = signature(self.target)
-            all_args = dict(zip(target_sig.parameters, args))
-        else:
-            all_args = {str(i): v for i, v in enumerate(args)}
-        all_args.update(kwargs)
-
+        # Normal parameter matching
         callback_kwargs = {}
-        for param_name in callback_sig.parameters:
+        for param_name in callback_params:
             if param_name in all_args:
                 callback_kwargs[param_name] = all_args[param_name]
-
         return callback_kwargs
 
 
@@ -81,8 +112,8 @@ class HookFn(Wrapper):
 
     def __call__(self, args: tuple, kwargs: dict) -> Hook | None:
         """Execute the hook around a function call"""
-        mock_kwargs = self._build_kwargs(args, kwargs)
-        return self.callback(**mock_kwargs)
+        hook_kwargs = self._build_kwargs(args, kwargs)
+        return self.callback(**hook_kwargs)
 
 
 class MockFn(Wrapper):
@@ -96,7 +127,6 @@ class MockFn(Wrapper):
 
     async def __call__(self, **kwargs: Any) -> Any:
         """Execute the mock function with validated arguments"""
-        # Filter kwargs to only those the mock accepts
         mock_kwargs = self._build_kwargs((), kwargs)
         result = await self.callback(**mock_kwargs)
         return result
@@ -116,7 +146,7 @@ def format_input_dict(fn: Callable, args: tuple, kwargs: dict) -> dict[str, Any]
 
 def hook(
     target_fn: Callable[..., Awaitable[Any]] | None = None,
-) -> Callable[[Callable], HookFn]:  # CHANGED: Made target_fn optional
+) -> Callable[[Callable], HookFn]:
     def decorator(hook_fn: Callable) -> HookFn:
         if not hasattr(hook_fn, "__name__"):
             raise ValueError("Hooked functions must have a __name__ attribute")

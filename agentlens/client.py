@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from functools import wraps
 from typing import (
     Any,
@@ -48,6 +49,8 @@ class Observation:
     name: str
     parent: Observation | None
     children: list[Observation]
+    start_time: datetime
+    end_time: datetime | None
 
 
 @contextmanager
@@ -137,6 +140,8 @@ def observe(
                 name=fn.__name__,
                 parent=parent_observation,
                 children=[],
+                start_time=datetime.now(),
+                end_time=None,
             )
             if parent_observation:
                 parent_observation.children.append(observation)
@@ -179,6 +184,7 @@ def observe(
                     except StopIteration:
                         pass
 
+                observation.end_time = datetime.now()
                 return result
 
         return wrapper
