@@ -22,7 +22,6 @@ from agentlens.evaluation import (
     Hook,
     HookFn,
     MockFn,
-    MockMiss,
     format_input_dict,
 )
 
@@ -173,9 +172,14 @@ def observe(
                     if mock is not None:
                         result = await mock(**input_dict)
                     else:
-                        raise MockMiss
-                except MockMiss:  # make sure not to catch other errors
-                    result = await fn(**input_dict)
+                        result = await fn(**input_dict)
+                except Exception as e:
+                    for gen in generators:
+                        try:
+                            gen.throw(type(e), e, e.__traceback__)
+                        except StopIteration:
+                            pass
+                    raise
 
                 # send result to generator hooks
                 for gen in generators:

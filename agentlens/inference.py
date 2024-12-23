@@ -4,7 +4,7 @@ import asyncio
 import logging
 import random
 import textwrap
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal, Type, TypeVar, overload
 
@@ -151,48 +151,26 @@ class ModelProvider(ABC):
     def get_semaphore(self, model: str) -> asyncio.Semaphore:
         return self._semaphores.get(model, self._default_semaphore)
 
-    @abstractmethod
     async def generate_text(
         self,
         *,
         model: str,
         messages: list[Message],
-        **kwargs,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> str:
-        pass
+        raise NotImplementedError
 
-    @overload
-    @abstractmethod
     async def generate_object(
         self,
         *,
         model: str,
         messages: list[Message],
         schema: Type[T],
-        **kwargs,
-    ) -> T: ...
-
-    @overload
-    @abstractmethod
-    async def generate_object(
-        self,
-        *,
-        model: str,
-        messages: list[Message],
-        schema: dict,
-        **kwargs,
-    ) -> dict: ...
-
-    @abstractmethod
-    async def generate_object(
-        self,
-        *,
-        model: str,
-        messages: list[Message],
-        schema: Type[T] | dict,
-        **kwargs,
-    ) -> T | dict:
-        pass
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> T:
+        raise NotImplementedError
 
     def __truediv__(self, model: str) -> Model:
         return Model(name=model, provider=self)
@@ -207,7 +185,8 @@ async def generate_text(
     dedent: bool = True,
     max_retries: int = 3,
     capture_messages: bool = True,
-    **kwargs,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
 ) -> str:
     return await _generate(
         model.provider.generate_text,
@@ -219,7 +198,8 @@ async def generate_text(
         dedent=dedent,
         max_retries=max_retries,
         capture_messages=capture_messages,
-        **kwargs,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
 
 
@@ -233,7 +213,8 @@ async def generate_object(
     dedent: bool = True,
     max_retries: int = 3,
     capture_messages: bool = True,
-    **kwargs,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
 ) -> T: ...
 
 
@@ -247,7 +228,8 @@ async def generate_object(
     dedent: bool = True,
     max_retries: int = 3,
     capture_messages: bool = False,
-    **kwargs,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
 ) -> dict[str, Any]: ...
 
 
@@ -261,7 +243,8 @@ async def generate_object(
     dedent: bool = True,
     max_retries: int = 3,
     capture_messages: bool = False,
-    **kwargs,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
 ) -> T | dict[str, Any]:
     if isinstance(schema, type) and hasattr(schema, "__name__"):
         schema.__name__ = "Response"
@@ -276,7 +259,8 @@ async def generate_object(
         dedent=dedent,
         max_retries=max_retries,
         capture_messages=capture_messages,
-        **kwargs,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
 
 
