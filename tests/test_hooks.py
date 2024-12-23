@@ -1,10 +1,10 @@
 import pytest
 
 import agentlens.evaluation as ev
-from agentlens.client import provide, task
+from agentlens.client import observe, provide
 
 
-@task
+@observe
 async def greet_person(name: str) -> str:
     return f"Hello, {name}"
 
@@ -23,7 +23,7 @@ def hook_no_yield(name: str):
     pass
 
 
-@task
+@observe
 async def combine_strings(a: str, b: str) -> str:
     return f"{a}-{b}"
 

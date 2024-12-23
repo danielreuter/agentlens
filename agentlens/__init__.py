@@ -1,4 +1,4 @@
-from .client import provide, task, use
+from .client import Observation, observe, provide, use
 from .evaluation import Hook, hook, mock
 from .inference import (
     Message,
@@ -14,7 +14,8 @@ from .inference import (
 
 __all__ = [
     "use",
-    "task",
+    "observe",
+    "Observation",
     "provide",
     "Model",
     "ModelProvider",

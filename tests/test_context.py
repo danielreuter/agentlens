@@ -1,17 +1,17 @@
 import pytest
 
-from agentlens.client import provide, task, use
+from agentlens.client import observe, provide, use
 from tests.conftest import Counter, Messages
 
 
-@task
+@observe
 async def increment_counter():
     c = use(Counter)
     c.value += 1
     return c.value
 
 
-@task
+@observe
 async def read_counter():
     c = use(Counter)
     return c.value
@@ -41,7 +41,7 @@ async def test_multiple_contexts():
     counter = Counter(value=10)
     messages = Messages()
 
-    @task
+    @observe
     async def add_message(msg: str) -> None:
         m = use(Messages)
         m.items.append(msg)
@@ -83,7 +83,7 @@ async def test_mutate_parent_through_reference():
     """
     parent_counter = Counter(value=0)
 
-    @task
+    @observe
     async def child_task():
         # Grab the parent's counter before overshadowing
         parent_ref = use(Counter)

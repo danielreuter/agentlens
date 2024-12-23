@@ -1,34 +1,34 @@
 import pytest
 
-from agentlens.client import task
+from agentlens.client import observe
 
 
-@task
+@observe
 async def add_nums(a: int, b: int) -> int:
     return a + b
 
 
-@task
+@observe
 async def kw_only_task(*, name: str, value: int) -> dict:
     return {"name": name, "value": value}
 
 
-@task
+@observe
 async def task_with_defaults(x: int, y: str = "default") -> str:
     return f"{x}-{y}"
 
 
-@task
+@observe
 async def always_raises():
     raise ValueError("Expected error")
 
 
-@task
+@observe
 async def parent_task():
     return "parent"
 
 
-@task
+@observe
 async def child_task():
     return "child"
 

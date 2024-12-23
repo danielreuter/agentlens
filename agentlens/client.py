@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 
 from agentlens.context import ContextStack, get_cls_name_or_raise, get_fn_name_or_raise
 from agentlens.evaluation import (
+    GLOBAL_HOOK_KEY,
     Hook,
     HookFn,
     MockFn,
@@ -44,6 +45,7 @@ def use(named_object: type[ObjectT]) -> ObjectT:
 @dataclass
 class Observation:
     id: UUID
+    name: str
     parent: Observation | None
     children: list[Observation]
 
@@ -76,18 +78,22 @@ def provide(
     for hook in hooks:
         if not isinstance(hook, HookFn):
             raise ValueError("Hook was not decorated with @hook")
-        name = get_fn_name_or_raise(hook.target)
-        if name in current_hooks:
-            current_hooks[name].append(hook)
+
+        key = GLOBAL_HOOK_KEY if hook.target is None else get_fn_name_or_raise(hook.target)
+        if key in current_hooks:
+            current_hooks[key].append(hook)
         else:
-            current_hooks[name] = [hook]
+            current_hooks[key] = [hook]
 
     current_mocks = (_mocks.current or {}).copy()
     unique_mock_names = set()
     for mock in mocks:
         if not isinstance(mock, MockFn):
             raise ValueError("Mock was not decorated with @mock")
-        name = get_fn_name_or_raise(mock.target)
+        if not mock.target:
+            name = GLOBAL_HOOK_KEY
+        else:
+            name = get_fn_name_or_raise(mock.target)
         if name in unique_mock_names:
             raise ValueError(f"Provided multiple concurrent mocks for {name}")
         unique_mock_names.add(name)
@@ -103,16 +109,16 @@ def provide(
 
 
 @overload
-def task(fn: F) -> F: ...
+def observe(fn: F) -> F: ...
 
 
 @overload
-def task() -> (
+def observe() -> (
     Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]
 ): ...
 
 
-def task(
+def observe(
     fn: Callable[P, Coroutine[Any, Any, R]] | None = None,
 ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]:
     def decorator(
@@ -128,6 +134,7 @@ def task(
 
             observation = Observation(
                 id=uuid4(),
+                name=fn.__name__,
                 parent=parent_observation,
                 children=[],
             )
@@ -135,17 +142,17 @@ def task(
                 parent_observation.children.append(observation)
 
             with provide(observation, on_conflict="nest"):
-                try:
-                    hooks = _hooks.use(fn)
-                except Exception:
-                    hooks = []
+                current_hooks = _hooks.current or {}
+                fn_hooks = current_hooks.get(get_fn_name_or_raise(fn), [])
+                global_hooks = current_hooks.get(GLOBAL_HOOK_KEY, [])
+                all_hooks = fn_hooks + global_hooks
 
                 generators: list[Hook] = []
                 injected_inputs: dict[str, Any] = {}
-                for hook in hooks:
+                for hook in all_hooks:
                     gen = hook(args, kwargs)
                     if isinstance(gen, Generator):
-                        generators.append(gen)  # type: ignore[arg-type]
+                        generators.append(gen)
                         new_inputs = next(gen) or {}
                         injected_inputs.update(new_inputs)
 
@@ -153,10 +160,10 @@ def task(
                 input_dict = format_input_dict(fn, args, kwargs)
                 input_dict.update(injected_inputs)
 
-                try:
-                    mock = _mocks.use(fn)
-                except Exception:
-                    mock = None
+                # Get mock directly from current dict
+                current_mocks = _mocks.current or {}
+                mock = current_mocks.get(get_fn_name_or_raise(fn))
+
                 try:
                     if mock is not None:
                         result = await mock(**input_dict)

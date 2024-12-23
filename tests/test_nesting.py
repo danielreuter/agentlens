@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from agentlens.client import provide, task, use
+from agentlens.client import observe, provide, use
 
 
 @dataclass
@@ -11,14 +11,14 @@ class Trace:
     children: list[str] = field(default_factory=list)
 
 
-@task
+@observe
 async def child_task_one():
     parent_trace = use(Trace)
     parent_trace.children.append("child_one")
     return parent_trace
 
 
-@task
+@observe
 async def child_task_two():
     parent_trace = use(Trace)
     parent_trace.children.append("child_two")
@@ -46,7 +46,7 @@ async def test_conflict_nest():
     parent_trace = Trace()
     child_trace = Trace()
 
-    @task
+    @observe
     async def read_trace():
         return use(Trace)
 
@@ -70,7 +70,7 @@ async def test_mutate_parent_trace():
     """
     parent_trace = Trace()
 
-    @task
+    @observe
     async def child():
         p = use(Trace)  # parent's trace
         new_trace = Trace()
@@ -90,7 +90,7 @@ async def test_mutate_parent_trace():
 async def test_reading_from_parent():
     parent_trace = Trace()
 
-    @task
+    @observe
     async def child_task():
         p = use(Trace)
         child_trace = Trace()

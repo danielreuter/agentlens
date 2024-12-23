@@ -1,19 +1,19 @@
-from agentlens.client import Observation, task, use
+from agentlens.client import Observation, observe, use
 
 
-@task
+@observe
 async def top_level_task():
     obs = use(Observation)
     return obs
 
 
-@task
+@observe
 async def child_task():
     obs = use(Observation)
     return obs
 
 
-@task
+@observe
 async def parent_calls_child():
     obs_parent = use(Observation)
     c_obs = await child_task()
@@ -33,17 +33,17 @@ async def test_nested_observations():
 
 
 async def test_chained_observations():
-    @task
+    @observe
     async def grandchild():
         return use(Observation)
 
-    @task
+    @observe
     async def child():
         c_obs = use(Observation)
         gc_obs = await grandchild()
         return c_obs, gc_obs
 
-    @task
+    @observe
     async def parent():
         p_obs = use(Observation)
         c_obs, gc_obs = await child()
@@ -55,11 +55,11 @@ async def test_chained_observations():
 
 
 async def test_multiple_siblings():
-    @task
+    @observe
     async def sibling_task():
         return use(Observation)
 
-    @task
+    @observe
     async def parent():
         p_obs = use(Observation)
         s1 = await sibling_task()
@@ -72,7 +72,7 @@ async def test_multiple_siblings():
 
 
 async def test_access_observation_self():
-    @task
+    @observe
     async def some_task():
         obs = use(Observation)
         return obs.id

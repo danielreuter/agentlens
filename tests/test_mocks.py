@@ -1,10 +1,10 @@
 import pytest
 
 import agentlens.evaluation as ev
-from agentlens.client import provide, task
+from agentlens.client import observe, provide
 
 
-@task
+@observe
 async def multiply(x: int, y: int) -> int:
     return x * y
 

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "agentlens"
-version = "0.1.30"
+version = "0.1.33"
 description = "lightweight abstractions for building agent scaffolds"
 authors = ["danielreuter <dreuter14@gmail.com>"]
 readme = "README.md"

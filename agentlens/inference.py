@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable, Literal, Type, TypeVar, overload
 from pydantic import BaseModel
 from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
 
-from agentlens.client import task
+from agentlens.client import observe
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ class ModelProvider(ABC):
         return Model(name=model, provider=self)
 
 
-@task
+@observe
 async def generate_text(
     model: Model,
     messages: list[Message] | None = None,
@@ -251,7 +251,7 @@ async def generate_object(
 ) -> dict[str, Any]: ...
 
 
-@task
+@observe
 async def generate_object(
     model: Model,
     schema: Type[T] | dict[str, Any],
