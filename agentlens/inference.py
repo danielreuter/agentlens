@@ -13,6 +13,11 @@ from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponen
 
 from agentlens.client import observe
 
+# Configuration constants
+DEFAULT_TIMEOUT_SECONDS = 480
+DEFAULT_MAX_RETRIES = 5
+DEFAULT_BACKOFF_MAX_SECONDS = 300  # 5 minutes max between retries
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,6 +181,12 @@ class ModelProvider(ABC):
         return Model(name=model, provider=self)
 
 
+class GenerationTimeoutError(Exception):
+    """Raised when text generation exceeds the specified timeout."""
+
+    pass
+
+
 @observe
 async def generate_text(
     model: Model,
@@ -183,10 +194,11 @@ async def generate_text(
     system: str | dict[str, str | dict] | None = None,
     prompt: str | dict[str, str | dict] | None = None,
     dedent: bool = True,
-    max_retries: int = 3,
+    max_retries: int = DEFAULT_MAX_RETRIES,
     capture_messages: bool = True,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> str:
     return await _generate(
         model.provider.generate_text,
@@ -200,6 +212,7 @@ async def generate_text(
         capture_messages=capture_messages,
         max_tokens=max_tokens,
         temperature=temperature,
+        timeout=timeout,
     )
 
 
@@ -211,10 +224,11 @@ async def generate_object(
     system: str | dict[str, str | dict] | None = None,
     prompt: str | dict[str, str | dict] | None = None,
     dedent: bool = True,
-    max_retries: int = 3,
+    max_retries: int = DEFAULT_MAX_RETRIES,
     capture_messages: bool = True,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> T: ...
 
 
@@ -226,10 +240,11 @@ async def generate_object(
     system: str | dict[str, str | dict] | None = None,
     prompt: str | dict[str, str | dict] | None = None,
     dedent: bool = True,
-    max_retries: int = 3,
+    max_retries: int = DEFAULT_MAX_RETRIES,
     capture_messages: bool = False,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]: ...
 
 
@@ -241,10 +256,11 @@ async def generate_object(
     system: str | dict[str, str | dict] | None = None,
     prompt: str | dict[str, str | dict] | None = None,
     dedent: bool = True,
-    max_retries: int = 3,
+    max_retries: int = DEFAULT_MAX_RETRIES,
     capture_messages: bool = False,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> T | dict[str, Any]:
     if isinstance(schema, type) and hasattr(schema, "__name__"):
         schema.__name__ = "Response"
@@ -261,6 +277,7 @@ async def generate_object(
         capture_messages=capture_messages,
         max_tokens=max_tokens,
         temperature=temperature,
+        timeout=timeout,
     )
 
 
@@ -274,6 +291,7 @@ async def _generate(
     dedent: bool,
     max_retries: int,
     capture_messages: bool,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
     **kwargs,
 ) -> Any:
     collected_messages = _create_messages(
@@ -282,23 +300,22 @@ async def _generate(
         prompt=prompt,
         dedent=dedent,
     )
-    if capture_messages:
-        print("capture_messages still not implemented")
     try:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(max_retries),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
+            wait=wait_exponential(multiplier=1, min=1, max=DEFAULT_BACKOFF_MAX_SECONDS),
             reraise=True,
         ):
             with attempt:
                 try:
                     async with semaphore:
                         await asyncio.sleep(random.uniform(0, 0.1))
-                        return await generate(
-                            model=model_name,
-                            messages=collected_messages,
-                            **kwargs,
-                        )
+                        async with asyncio.timeout(timeout):
+                            return await generate(
+                                model=model_name,
+                                messages=collected_messages,
+                                **kwargs,
+                            )
                 except Exception as e:
                     logger.debug(
                         f"Retry ({attempt.retry_state.attempt_number} of {max_retries}): {e}"
